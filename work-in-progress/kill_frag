@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+PIDS=`ps -ef | grep -i frag | grep -v grep | awk '{ print $2 }'`
+
+kill -2 ${PIDS}

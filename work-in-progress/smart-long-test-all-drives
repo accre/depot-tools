@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+LOGFILE="/var/log/smartscanalldrives.log"
+
+DATE=`date`
+
+echo "${DATE} - Runnning long SMART scan of all data drives" >> ${LOGFILE}
+
+for i in `ls -1 /sys/block | grep sd`
+do
+
+        # Don't run a new SMART test if one is already running 
+        IS_SMART_TEST_ALREADY_RUNNING=`smartctl -c /dev/${i} | grep "Self-test routine in progress" | wc -l`
+        [ "${IS_SMART_TEST_ALREADY_RUNNING}" -eq "1" ] && continue
+
+	smartctl -t long /dev/${i} > /dev/null 2>&1
+done

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+LOGFILE="/var/log/smartscanalldrives.log"
+
+DATE=`date`
+
+echo "${DATE} - Runnning short SMART scan of all data drives" >> ${LOGFILE}
+
+SL="/var/log/smart" # The folder for the individual SMART logs
+
+[ ! -d "${SL}" ] && mkdir -p ${SL}
+
+for i in `ls -1 /sys/block | grep sd`
+do
+
+	# Don't run a new SMART test if one is already running
+	IS_SMART_TEST_ALREADY_RUNNING=`smartctl -c /dev/${i} | grep "Self-test routine in progress" | wc -l`
+	[ "${IS_SMART_TEST_ALREADY_RUNNING}" -eq "1" ] && continue
+
+	smartctl -t short /dev/${i} &> /dev/null
+done
+
+
+sleep 300	# Give time for all SMART tests to complete
+
+for i in `ls -1 /sys/block | grep sd`
+do
+
+	[ -e ${SL}/smart-${i}.log.3 ] && rm -f ${SL}/smart-${i}.log.3
+	[ -e ${SL}/smart-${i}.log.2 ] && mv ${SL}/smart-${i}.log.2 ${SL}/smart-${i}.log.3
+	[ -e ${SL}/smart-${i}.log.1 ] && mv ${SL}/smart-${i}.log.1 ${SL}/smart-${i}.log.2
+	[ -e ${SL}/smart-${i}.log   ] && mv ${SL}/smart-${i}.log   ${SL}/smart-${i}.log.1
+
+	smartctl -a /dev/${i} &> ${SL}/smart-${i}.log &
+done
