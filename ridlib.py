@@ -1734,3 +1734,10 @@ def RID_Export(Rid, MD_Dir = ""):
 	if os.path.isdir(MD_Import_Folder):
 		shutil.rmtree(MD_Import_Folder)
 
+
+def RID_Detach(Rid, Hostname, Port = "6714", Msg = "Detaching Rid"):
+	SysExec("ibp_detach_rid " + Hostname + " " + Port + " " + Rid + " 1 " + Msg)
+
+def RID_Attach(Rid, Hostname, Port = "6714", Msg = "Attaching Rid"):
+	SysExec("ibp_attach_rid " + Hostname + " " + Port + " " + Rid + " " + Msg)
+
