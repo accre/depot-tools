@@ -8,6 +8,8 @@ import socket
 
 from ridlib import *
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
+
 """
 
 Determine if any RIDS have bounced, blipped, or otherwise vanished.
