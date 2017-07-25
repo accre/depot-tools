@@ -1,0 +1,593 @@
+#!/usr/bin/env python
+
+"""
+lsslot - Mathew Binkley
+
+Display a table showing which hard drive is in each slot on a depot.
+"""
+
+import re
+import time
+import socket
+#import os
+#import stat
+
+from subprocess import Popen, PIPE, STDOUT
+from prettytable import PrettyTable
+
+# Cache info
+CacheDataArray = {}
+CacheTimeArray = {}
+
+# Array to hold the output for pretty printing
+Output = []
+
+# Enable/disable debugging messages
+Print_Debug = False
+
+
+def Debug(text):
+
+	"""
+	A wrapper to print debugging info on a single line.
+	"""
+
+	if Print_Debug:
+		print("DEBUG: " + text)
+	return
+
+
+def SysExec(cmd):
+
+	"""
+	Run the given command and return the output.  Cache the output
+	for faster response time if it is fresh enough.
+	"""
+
+	# Cache the output of the command for 20 seconds
+	Cache_Expires = 20
+
+	# Computed once, used twice
+	Cache_Keys = list(CacheDataArray.keys())
+	if cmd in Cache_Keys:
+		Cache_Age = time.time() - CacheTimeArray[cmd]
+	else:
+		Cache_Age = 0
+
+	# If we have valid data cached, return it
+	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+		return CacheDataArray[cmd]
+
+	# If the cmd is "cat", use fopen/fread/fclose to open it and
+	# cache it as we go
+	if cmd.split()[0] == "cat":
+		f = open(cmd.split()[1], "r")
+		CacheDataArray[cmd] = f.read()
+		CacheTimeArray[cmd] = time.time()
+		f.close()
+		return CacheDataArray[cmd]
+
+	# If we don't have cached data, or it's too old, regenerate it
+	if cmd not in Cache_Keys or Cache_Age > Cache_Expires:
+		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+		CacheTimeArray[cmd] = time.time()
+		return CacheDataArray[cmd]
+
+	return "ERROR"
+
+
+def FindBackplanes():
+
+	"""
+	Use the "lsbackplane" command to return info about backplanes in the server.
+	"""
+
+	Debug("def FindBackplanes() entry")
+
+	Backplanes = {}
+
+	# Iterate over a list of enclosures
+	output_lsbackplane = SysExec("lsbackplane")
+
+	for line in output_lsbackplane.splitlines():
+
+		if not re.search("/dev/", line):
+			continue
+
+		Enc_SG_Dev = line.split("|")[1].strip()
+
+		Backplanes[Enc_SG_Dev] = {}
+		Backplanes[Enc_SG_Dev]["NumSlots"] = line.split("|")[2].strip()
+		Backplanes[Enc_SG_Dev]["Bus"] = line.split("|")[3].strip()
+		Backplanes[Enc_SG_Dev]["SASAddr"] = line.split("|")[4].strip()
+		Backplanes[Enc_SG_Dev]["Alias"] = line.split("|")[5].strip()
+
+		Debug("FindBackplanes()::  Backplane " + Enc_SG_Dev + " NumSlots " + Backplanes[Enc_SG_Dev]["NumSlots"] + " Bus " + Backplanes[Enc_SG_Dev]["Bus"] + " SASAddr " + Backplanes[Enc_SG_Dev]["SASAddr"] + " Alias " + Backplanes[Enc_SG_Dev]["Alias"])
+
+	Debug("def FindBackplanes() exit")
+
+	return Backplanes
+
+
+def Get_ChassisBackplane():
+
+	"""
+	Try to guess the backplane model we are dealing with (Chenbro, AIC).  I'm not sure if there's
+	an official way of doing it, so this is just my hacky first stab at it.
+
+	Right now I'm only returning a list of detected backplane models, but I may want to add more
+	in the future, if only I knew what it was...
+	"""
+
+	Debug("def Get_ChassisBackplane() entry")
+
+	Backplanes = []
+
+	output_backplanes = SysExec("ls -1 /sys/class/enclosure")
+
+	for bus in output_backplanes.splitlines():
+
+		Vendor = SysExec("cat /sys/class/enclosure/" + bus + "/device/vendor").strip()
+		Model  = SysExec("cat /sys/class/enclosure/" + bus + "/device/model").strip()
+
+		Debug("Get_ChassisBackplane():: Detected backplane " + Vendor + " " + Model)
+
+		Backplanes.append(Vendor + " " + Model)
+
+	Debug("def Get_ChassisBackplane() entry")
+
+	return Backplanes
+
+
+def Get_SASController():
+
+	"""
+	Return the SAS controller model in this depot.
+	"""
+
+	Debug("def Get_SASController() entry")
+
+	output_lspci = SysExec("lspci")
+
+	# Determine the card type, and thus the path we need to take...
+	SAS_Controller = "Unknown"
+
+	for line in output_lspci.splitlines():
+
+		# Falcon is our 1st gen SAS controller (cms-depot1-17,19-38)
+		if re.search(r"Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS2008 PCI-Express Fusion-MPT SAS-2 \[Falcon\] \(rev 03\)", line):
+			SAS_Controller = "LSI_Falcon"
+			break
+
+		# Thunderbolt is our 2nd gen SAS controller (cms-depot39-44)
+		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS 2208 \[Thunderbolt\] \(rev 05\)", line):
+			SAS_Controller = "LSI_Thunderbolt"
+			break
+
+		# Invader is our 3rd gen SAS controller (cms-depot45-60)
+		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
+			SAS_Controller = "LSI_Invader"
+			break
+
+	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
+
+	if SAS_Controller == "Unknown":
+		Debug("Get_SASController()::  This is an unknown controller type which may not work properly without new code.")
+
+	Debug("def Get_SASController() exit")
+
+	return SAS_Controller
+
+
+def GetLocateLEDState(This_Backplane, This_Slot):
+	"""
+	This function returns the state of the Locate LED on the given backplane/slot
+	"""
+
+	# I omit the entry/exit debugs as this function is near bulletproof and gets
+	# called several zillion times, which interferes with actual debugging.
+
+	This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
+
+	LedState_Descr = "Unknown"
+	if This_LedState == "1":
+		LedState_Descr = "On"
+	if This_LedState == "0":
+		LedState_Descr = "Off"
+
+#	Debug("GetLocateLEDState(): Backplane " + Backplane + " Slot " + str(i) + " is set to " + LedState_Descr)
+
+# 	This may not work on some depots. :-/   You may have to try another led target like "fault" on
+#	a per-HBA/per-backplane basis, or you might need to use MegaCLI for some depots, ala:
+#
+#	MegaCli -AdpSetProp \{UseDiskActivityforLocate -1\}  -aALL    # might be optional on some drives / enclosures
+#	MegaCli -PdLocate -start -physdrv\[E:S\]  -aALL
+
+	return LedState_Descr
+
+
+def map_Dev_to_RID():
+
+	"""
+	Return a map of /dev/ entry -> RID
+	"""
+
+	Debug("def map_Dev_to_RID() entry")
+
+	Map = {}
+
+	output_ridlist = SysExec("ls -alh /dev/disk/by-label")
+
+	for line in output_ridlist.splitlines():
+		if not re.search("rid-data-", line):
+			continue
+
+		This_Dev = line.split(" ")[-1]
+		This_Dev = This_Dev.split("/")[2]
+		This_Dev = re.sub("[0-9]*$", "", This_Dev)
+		This_Dev = "/dev/" + This_Dev
+
+		This_Rid = line.split(" ")[-3]
+		This_Rid = This_Rid.split("-")[2]
+
+		Debug("map_Dev_to_Rid()::  Dev " + This_Dev + " = Rid " + This_Rid)
+
+		Map[This_Dev] = This_Rid
+
+	Debug("def map_Dev_to_RID() exit")
+
+	return Map
+
+
+def map_SAS_to_Dev():
+
+	"""
+	Return a map of /dev/ entry -> SAS/GUID/Id/WWN address
+	"""
+
+	Debug("def map_SAS_to_Dev() entry")
+
+	Map = {}
+
+	output_saslist = SysExec("ls -alh /dev/disk/by-id")
+
+	for line in output_saslist.splitlines():
+
+		if not re.search("wwn-", line):
+			continue
+
+		if re.search("part", line):
+			continue
+
+		This_Dev = line.split(" ")[-1]
+		This_Dev = This_Dev.split("/")[2]
+		This_Dev = re.sub("[0-9]*$", "", This_Dev)
+		This_Dev = "/dev/" + This_Dev
+
+		This_SAS = line.split(" ")[-3]
+		This_SAS = This_SAS.split("-")[1]
+		This_SAS = This_SAS.split("x")[1]
+
+		Debug("map_SAS_to_Dev()::  Dev " + This_Dev + " = SAS " + This_SAS)
+
+		Map[This_SAS] = This_Dev
+
+	Debug("def map_SAS_to_Dev() exit")
+
+	return Map
+
+
+def map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes):
+
+	"""
+	This will return a mapping of Backplane/Slot to SAS address using sg_ses.
+	sg_ses only returns one variable bit (SAS address)
+	"""
+
+	Debug("def map_Backplane_Slot_to_SAS_with_sgses() entry")
+
+	Map = {}
+
+	for This_Backplane in AllBackplanes:
+
+		Map[This_Backplane] = {}
+
+		output_sgses = SysExec("sg_ses -p aes " + This_Backplane)
+
+		val_slot = None
+		val_sas  = None
+
+		for line in output_sgses.splitlines():
+
+			if not re.search("Element index:", line) and not re.search("SAS address", line):
+				continue
+
+			if re.search("attached SAS address", line):
+				continue
+
+			if re.search("Element index:", line):
+				val_slot = line.split(":")[1]
+				val_slot = val_slot.split(" ")[1]
+
+			if re.search("SAS address", line):
+				val_sas = line.split(":")[1]
+				val_sas = re.sub(" ", "", val_sas)
+				val_sas = re.sub("^0x", "", val_sas).lower()
+
+			if val_slot and val_sas:
+
+				Debug("map_Backplane_Slot_to_SAS_with_sgses()::  Backplane " + This_Backplane + " slot " + str(val_slot) + " maps to SAS " + val_sas)
+
+				Map[This_Backplane][val_slot] = val_sas
+				val_slot = None
+				val_sas  = None
+
+	Debug("def map_Backplane_Slot_to_SAS_with_sgses() exit")
+
+	return Map
+
+
+def map_intermediate_SAS_to_WWN_with_MegaCli():
+
+	"""
+	Return a map of SAS to WWN using the LSI MegaCLI utility.  This is necessary for cards
+	using our 2nd generation HBA controller ("LSI_Thunderbolt")
+	"""
+
+	Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() entry")
+
+	Map = {}
+	val_wwn = None
+	val_sas = None
+
+	output_megacli = SysExec("MegaCli64 -PDList -aALL -NoLog")
+
+	for line in output_megacli.splitlines():
+
+		if not re.search("WWN", line) and not re.search("SAS Address", line):
+			continue
+
+		if re.search("WWN", line):
+			val_wwn = line.split(":")[-1].strip().lower()
+
+		elif re.search("SAS Address", line):
+			SAS = line.split(":")[-1]
+			val_sas = SAS.split("x")[-1].strip().lower()
+			# Sometimes there are multiple SAS values.  Ignore ones that are 0
+			if val_sas == "0":
+				val_sas = None
+				continue
+
+		if val_wwn and val_sas:
+
+			# Extra hacky, but necessary.  This is a guess, but the LSI controller appears to use the
+			# drives's WWN if it has one, and autogenerates one if it  doesn't.  The former case appears
+			# to include some of our SAS drives (not SATA drives).  I'm not sure if this is the textbook
+			# solution, but it works in our case.
+			if val_sas.startswith("5000c"):
+				val_wwn = hex(int(val_sas, 16) + 2).split("x")[1].lower()
+
+			Debug("map_intermediate_SAS_to_WWN_with_MegaCli()::  SAS " + str(val_sas) + " maps to WWN " + str(val_wwn))
+			Map[val_sas] = val_wwn
+
+			val_wwn = None
+			val_sas = None
+
+	Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() exit")
+
+	return Map
+
+
+def map_intermediate_SAS_to_WWN_with_sas2ircu():
+
+	"""
+	This will return a mapping the intermediate SAS to WWN addreses using sas2ircu which is
+	necessary for the LSI_Falcon HBA controllers.
+	"""
+
+	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() entry")
+
+	Map = {}
+
+	val_device = None
+	val_sas    = None
+	val_wwn    = None
+
+	output_sas2ircu = SysExec("sas2ircu 0 display")
+
+	for line in output_sas2ircu.splitlines():
+
+		if not re.search("Device is a", line) and \
+		   not re.search("SAS Address", line) and \
+		   not re.search("GUID", line):
+			continue
+
+		if re.search("Device is a", line):
+			val_device = re.sub("Device is a ", "", line)
+		elif re.search("SAS Address", line):
+			val_sas = line.split(":")[1]
+			val_sas = re.sub(" ", "", val_sas)
+			val_sas = re.sub("-", "", val_sas).lower()
+		elif re.search("GUID", line):
+			val_wwn = line.split(":")[1]
+			val_wwn = re.sub(" ", "", val_wwn)
+
+		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
+
+		if val_device and val_sas and val_wwn:
+
+			if val_device == "Hard disk":
+
+				Map[val_sas] = val_wwn
+
+			val_device    = None
+			val_sas       = None
+			val_wwn      = None
+
+	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() exit")
+
+	return Map
+
+
+def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
+
+	"""
+	This function tries to encapsulate the ideosyncracies of each HBA controller
+	so we can output a consistent SAS_to_Dev Map
+	"""
+
+	Debug("def fudge_SAS_to_Dev_map() entry")
+
+	Remap_SAS_to_Dev = {}
+
+	if SAS_Controller == "LSI_Falcon":
+
+		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
+
+		for This_SAS, This_WWN in Remap_SAS_to_WWN.iteritems():
+
+			if This_WWN in SAS_to_Dev:
+				This_Dev = SAS_to_Dev[This_WWN]
+			else:
+				This_Dev = "Empty_Slot"
+
+			Remap_SAS_to_Dev[This_SAS] = This_Dev
+
+
+	if SAS_Controller == "LSI_Thunderbolt":
+
+		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_MegaCli()
+
+		for This_SAS, This_WWN in Remap_SAS_to_WWN.iteritems():
+
+			if This_WWN in SAS_to_Dev:
+				This_Dev = SAS_to_Dev[This_WWN]
+			else:
+				This_Dev = "Empty_Slot"
+
+			Remap_SAS_to_Dev[This_SAS] = This_Dev
+
+
+	if SAS_Controller == "LSI_Invader":
+
+
+		# On cms-depot18 it appears to need intermediate info too... :-|
+		if socket.gethostname() == "cms-depot18.vampire":
+
+			Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_MegaCli()
+
+			for This_SAS, This_WWN in Remap_SAS_to_WWN.iteritems():
+
+				if This_WWN in SAS_to_Dev:
+					This_Dev = SAS_to_Dev[This_WWN]
+				else:
+					This_Dev = "Empty_Slot"
+
+				Remap_SAS_to_Dev[This_SAS] = This_Dev
+
+		else:
+
+			for This_SAS, This_Dev in SAS_to_Dev.iteritems():
+				New_SAS = hex(int(This_SAS, 16) - 2).split("x")[1].lower()
+
+				Remap_SAS_to_Dev[New_SAS] = This_Dev
+
+	Debug("def fudge_SAS_to_Dev_map() exit")
+
+	return Remap_SAS_to_Dev
+
+
+def map_Backplane_Slot_to_Dev(AllBackplanes):
+
+	"""
+	This function returns a map of backplane/slot to /dev/entry
+	"""
+
+	Debug("def map_Backplane_Slot_to_Dev() entry")
+
+	Map = {}
+
+	Backplane_Slot_to_SAS = map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes)
+
+	# Adjust this for any HBA-dependent stuff (shift-by-two, intermediate SAS->WWN)
+	SAS_Controller = Get_SASController()
+
+	SAS_to_Dev = fudge_SAS_to_Dev_map(map_SAS_to_Dev(), SAS_Controller)
+
+	for This_Backplane in AllBackplanes:
+
+		Map[This_Backplane] = {}
+
+		NumSlots = int(AllBackplanes[This_Backplane]["NumSlots"])
+
+		Debug("map_Backplane_Slot_to_Dev()::  Working on Backplane " + str(This_Backplane) + " with NumSlots " + str(NumSlots))
+
+		for slot in range(0, NumSlots):
+
+			if This_Backplane not in Backplane_Slot_to_SAS:
+				Debug("map_Backplane_Slot_to_Dev()::  ERROR!  I couldn't find Backplane " + This_Backplane + " listed in Backplane_Slot_to_SAS dict")
+				continue
+
+			if str(slot) not in Backplane_Slot_to_SAS[This_Backplane]:
+				Debug("map_Backplane_Slot_to_Dev()::  ERROR!  I couldn't find slot " + str(slot) + " listed in Backplane_Slot_to_SAS[" + This_Backplane + "] dict")
+				continue
+
+			SAS = Backplane_Slot_to_SAS[This_Backplane][str(slot)]
+			SAS = re.sub("0x","", SAS)
+
+			This_Dev = "Empty_Slot"
+
+			if SAS in SAS_to_Dev:
+				This_Dev = SAS_to_Dev[SAS]
+
+			Debug("map_Backplane_Slot_to_Dev()::  Backplane = " + This_Backplane + " and Slot = " + str(slot) + " and SAS = " + SAS + " and Dev = " + This_Dev)
+
+			Map[This_Backplane][slot] = This_Dev
+
+	Debug("def map_Backplane_Slot_to_Dev() exit")
+
+	return Map
+
+
+#############################################################################
+# Main Loop
+#############################################################################
+
+Foo = Get_ChassisBackplane()
+
+Backplane_List = FindBackplanes()
+
+Backplane_Slot_to_Dev = map_Backplane_Slot_to_Dev(Backplane_List)
+
+Dev_to_RID = map_Dev_to_RID()
+
+for Backplane in Backplane_List:
+
+	Backplane_Alias = Backplane_List[Backplane]["Alias"]
+
+	for i in range(0, int(Backplane_List[Backplane]["NumSlots"])):
+
+		if Backplane not in Backplane_Slot_to_Dev:
+			Debug("MAIN LOOP::  Error!  No Backplane " + Backplane + " in Backplane_Slot_to_Dev dict")
+			continue
+
+		if i not in Backplane_Slot_to_Dev[Backplane]:
+			Debug("MAIN LOOP::  Error!  No Slot " + str(i) + " in Backplane_Slot_to_Dev[" + Backplane + "] dict")
+			continue
+
+		Dev = Backplane_Slot_to_Dev[Backplane][i]
+
+		Rid = "Empty"
+		if Dev in Dev_to_RID:
+			Rid = Dev_to_RID[Dev]
+
+		LedState = GetLocateLEDState(Backplane, i)
+
+		Output.append([Backplane_Alias, str(i), LedState, Dev, Rid])
+
+x = PrettyTable(["Backplane", "Slot", "Locate LED", "Dev", "RID"])
+x.padding_width = 1
+x.align = "l"
+for row in Output:
+	x.add_row(row)
+print x

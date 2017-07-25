@@ -1,0 +1,1182 @@
+#!/usr/bin/env python
+
+"""
+lsblock - by <Mathew.Binkley@Vanderbilt.edu>
+
+This script detects all the real block devices (ie, hard drives, cd's), and pulls 
+together some useful information into one place (kernel driver, drive model, media type,
+and interconnect).
+
+"""
+
+import re
+import os
+import sys
+import math
+import time
+
+# Note:  Any time you can avoid using Popen is a huge win time-wise
+from subprocess import Popen, PIPE, STDOUT
+
+ERROR_SYSFS  = "ERROR_SYSFS"
+ERROR_NOTUSB   = "ERROR_NOTUSB"
+ERROR_NOUSBBUS = "ERROR_NOUSBBUS"
+
+class BlockDevice(object):
+
+        SD_Device               = ""    # the /dev/sd* (or whatever) entry for the device
+        SG_Device               = ""    # the /dev/sg* entry corresponding to the device
+	RID			= ""	# the L-Store Resource ID
+        Sysfs                   = ""    # the /sys/devices entry for the device
+        KernelDriver            = ""    # the primary Linux kernel module used by the device
+        MediaType               = ""    # Disk, CD-Rom, etc. (Tape and other char devices aren't covered here)
+        Interconnect            = ""    # SATA, PATA, USB1/2/3, SCSI, SAS, Firewire, FC, Infiniband, etc.
+        Interconnect_Info       = ""    # Addition information about the Interconnect (chipset, bridge devices, etc.)
+        Vendor                  = ""    # Vendor
+        Model                   = ""    # Model
+        Serial                  = ""    # Serial number
+        HumanFriendlyVendor     = ""    # Human-friendly version of the vendor
+        HumanFriendlyModel      = ""    # Human-friendly version of the model
+        HumanFriendlySerial     = ""    # Human-friendly version of the serial
+        Firmware                = ""    # Firmware revision of the device
+        SMARTStatus             = 0     # Does SMART detect anything wrong with the drive?
+        RawSize                 = 0     # Size of the device in bytes
+        isSelfPowered           = 0     # Is the device self-powered (USB HD or CD) or bus-powered (flash)
+        isRotating              = 0     # Is the device based on rotating media (CD and HD)
+        isReadonly              = 0     # Is the device marked as read-only
+        isRemovable             = 0     # Is the device on removable media (CD, ejectable USB, etc.)
+        isMounted               = 0     # Is the media mounted or not?
+
+        # Note:  Some of these may require root access, so non-root users may only get a
+        #        subset of the information.
+
+        def __init__(self, SD_Device):
+
+                self.SD_Device = SD_Device
+
+                # Get the /sys/device entry corresponding to Dev
+                self.Sysfs          = Query_SysDevice(self.SD_Device)
+
+                # Find the generic SCSI device corresponding to this drive
+                self.SG_Device      = FindSG_Device(self.SD_Device, self.Sysfs).strip()
+
+		# Find the L-Store Resource ID
+		self.RID	    = FindRid(self.SD_Device)
+
+                # Find the kernel driver that this device uses
+                self.KernelDriver   = FindKernelDriver(self.Sysfs)
+
+                # What kind of media is it...
+                self.MediaType      = FindMediaType(self.SD_Device)
+
+                # Info on the interconnnect
+                (self.Interconnect, self.Interconnect_Info) = FindInterconnect(self.Sysfs)
+
+                # Set Model/Vendor via udev (works better in a few edge cases than the Sysfs method)
+                self.Vendor         = Query_udevadm(SD_Device, "Vendor")
+                self.Model          = Query_udevadm(SD_Device, "Model")
+                self.Serial         = Query_udevadm(SD_Device, "Serial")
+                self.Firmware       = Query_udevadm(SD_Device, "Firmware")
+
+                # Catch a edge-case for machines that stick the "Vendor" info in the "Model" field
+                if self.Vendor == "UNKNOWN" and not self.Model == "UNKNOWN":
+                        self.Vendor = HumanFriendlyVendor(self.Vendor, self.Model)
+
+                # Use the Sysfs method as a fallback if Vendor/Model/Serial return "UNKNOWN"
+                if self.Vendor == "UNKNOWN":
+                        _temp = ReturnSysfsValue(self.Sysfs, "vendor").strip()
+                        if not _temp == "ERROR_SYSFS":
+                                self.Vendor = _temp
+                if self.Model == "UNKNOWN":
+                        _temp = ReturnSysfsValue(self.Sysfs, "model").strip()
+                        if not _temp == "ERROR_SYSFS":
+
+                                self.Model = _temp
+                if self.Serial == "UNKNOWN":
+                        _temp = ReturnSysfsValue(self.Sysfs, "serial").strip()
+                        if not _temp == "ERROR_SYSFS":
+                                self.Serial = _temp
+
+                # Human-Friendly versions of some strings (cleans up many of the vendor's sins)
+                self.HumanFriendlyVendor     = HumanFriendlyVendor(self.Vendor, self.Model)
+                self.HumanFriendlyModel      = HumanFriendlyModel(self.SD_Device, self.Vendor, self.Model)
+                self.HumanFriendlySerial     = HumanFriendlySerial(self.Serial, self.Vendor, self.Model)
+
+                # Set a few booleans...
+                self.isRotating     = findisRotating(self.SD_Device)
+                self.isRO           = findisRO(self.SD_Device)
+                self.isRemovable    = findisRemovable(self.SD_Device)
+
+                # Size of the block device in bytes
+                self.RawSize        = findRawSize(self.SD_Device)
+
+                # If it's a USB Device, pull out some extra info
+                if self.Interconnect == "USB":
+                        self.Interconnect = self.Interconnect + FindUSBversion(self.Sysfs)
+                        self.isSelfPowered = (int(FindUSBbmAttributes(self.Sysfs), 16) & int("01000000", 2)) / int("01000000", 2)
+                        if self.isSelfPowered == 0:
+                                self.MediaType = "flash"
+
+        # Thest functions are in function_BlockDevice to keep things neat.
+        def PerformShortSMARTtest(self):
+                CallSMART(self.SD_Device, "test")
+
+        def CheckSMARTStatus(self):
+                self.SMARTStatus = CallSMART(self.SD_Device, "status")
+                return self.SMARTStatus
+
+
+def which(program):
+
+        """ 
+
+        Functions similar to the 'which' program in Unix.  Given 
+        an executable filename, it will return the whole path to
+        that executable.
+
+        which("ls") should return "/bin/ls"
+
+        Will print an error message and terminate the program if
+        it can't locate the executable in the path.
+
+        """
+
+        def is_exe(fpath):
+                return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+
+        def ext_candidates(fpath):
+                yield fpath
+                for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
+                        yield fpath + ext
+
+        fpath, fname = os.path.split(program)
+
+        if fpath:
+                if is_exe(program):
+                        return program
+        else:
+                for path in os.environ["PATH"].split(os.pathsep):
+                        exe_file = os.path.join(path, program)
+                        for candidate in ext_candidates(exe_file):
+                                if is_exe(candidate):
+                                        return candidate
+
+# If a required binary isn't available, quit.
+def Bin_Requires(bin):
+
+        # Because "bin" is required for this script to run, we do a little
+        # extra work trying to find it before giving up.
+
+        if os.path.isfile("/sbin/" + bin):
+                return "/sbin/" + bin
+        elif os.path.isfile("/usr/sbin/" + bin):
+                return  "/usr/sbin/" + bin
+        elif os.path.isfile("/usr/local/sbin/" + bin):
+                return  "/usr/local/sbin/" + bin
+
+        bin_path = which(bin)
+        if not bin_path:
+                print "ERROR: Could not locate " + bin + " in the PATH"
+                sys.exit()
+        return bin_path
+
+
+# If a recommended binary isn't available, you can still run, but let 
+# the user know it would work better if the binary was available
+def Bin_Recommends(bin):
+        bin_path = which(bin)
+        if not bin_path:
+                print "INFO:  This program would run better with " + bin + " in the PATH"
+        return bin_path
+
+
+# If a suggested binary isn't available, run anyway
+def Bin_Suggests(bin):
+        return which(bin)
+
+#######################################################
+### What external binaries do we need to have available
+#######################################################
+
+# udevadm is required.  This hack is a work-around for RHEL5,
+# which uses the "udevinfo" command to return the same information
+UDEVADM_BIN = which("udevinfo")
+if not UDEVADM_BIN:
+	UDEVADM_BIN = Bin_Requires("udevadm")
+
+LSPCI_BIN    = Bin_Requires("lspci")
+SMARTCTL_BIN = Bin_Requires("smartctl")
+
+CacheDataArray = {}
+CacheTimeArray = {}
+
+def SysExec(cmd):
+
+        """
+        Run the given command and return the output.  This command will cache the output
+        of commands it has run recently.
+        """
+
+        # Cache the output of the command for 5 seconds
+        Cache_Expires = 5
+
+        # Determine the age of the cache
+        Cache_Keys = list(CacheDataArray.keys())
+        if cmd in Cache_Keys:
+                Cache_Age  = time.time() - CacheTimeArray[cmd]
+        else:
+                Cache_Age  = 0
+
+        # If we have valid data cached, return it
+        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+                return CacheDataArray[cmd]
+
+        # If the cmd is "cat", use fopen/fread/fclose instead since they're much faster than a Popen call
+        if cmd.split()[0] == "cat":
+                f = open(cmd.split()[1], "r")
+                CacheDataArray[cmd] = f.read()
+                CacheTimeArray[cmd] = time.time()
+                f.close()
+                return CacheDataArray[cmd]
+
+        # If we don't have cached data, or it's too old, regenerate it
+        if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+                CacheTimeArray[cmd] = time.time()
+                return CacheDataArray[cmd]
+
+        return "ERROR"
+
+def Query_SysDevice(SD_Device):
+
+        """
+        Return the full /sys/device path to the given device
+        """
+
+        # If Drive is a symlink (like on modern OS's), the pci info will be in the symlink
+        # on older OS's (<cough>RHEL5<cough>) it's a folder, and you'll have to look inside
+        # it at the "/sys/block/DEV/devices" file to find the symlink
+
+        Drive = "/sys/block/" + SD_Device.split("/")[-1]
+
+        if not os.path.islink(Drive):
+                Drive = Drive + "/device"
+
+        Sysfsp1 = os.readlink(Drive).split(" ")[-1]
+
+        # We want the full path (/sys/devices/foo/bar/etc) to ensure consistency 
+        Sysfs = "/sys/" + re.sub("^(../)*", "", Sysfsp1).strip()
+
+        return Sysfs
+
+
+def Query_SysClassScsiDevice(SD_Device, Key):
+
+        """
+        Return the value of the Key for the specified Media
+        """
+        if not SD_Device:
+                return "UNKNOWN"
+
+        # Get the /sys/device TARGET associated with this device
+        Sysfs = Query_SysDevice(SD_Device)
+        Target = SplitSysfsString(Sysfs)[2].split("/")[1].strip()
+
+        sysfile = "/sys/class/scsi_device/" + Target + "/device/" + Key
+
+        if os.path.isfile(sysfile) or os.path.islink(sysfile):
+                return SysExec("cat " + sysfile).strip()
+
+        return "UNKNOWN"
+
+
+def SplitSysfsString(Sysfs):
+
+        """
+        Split a /sys/device path into Host, Intermediate, and Target strings
+        """
+
+        Sysfs_array = Sysfs.split("/")
+
+        # The "Host"  is *always* the first 2 entries (at least I've never found any exceptions)
+        Host = "/".join(Sysfs_array[3:5])
+
+        # Test for the keyword "target" in Sysfs.  If it exists (which is the usual case), then
+        # the device is handled by the Linux SCSI subsystem (this is true even it it's not a true
+        # SCSI device, for instance a SATA hard drive.)
+        if re.search("target", Sysfs):
+
+                # Target is everything after (and including) "/target"
+                TestTarget = Sysfs_array[5:]
+                while len(TestTarget) > 0:
+                        if TestTarget[0].startswith("target"):
+                                Target = "/".join(TestTarget)
+                                break
+                        TestTarget = TestTarget[1:]     # Chop off the first entry
+
+                # Intermediate is the stuff in-between
+                Intermediate = "/".join(Sysfs_array[len(Host.split("/")) + 3:-len(Target.split("/"))])
+
+        else:
+                # This is currently a SWAG to cover one weird machine that my testing uncovered.
+                # The weird drive is a older "/dev/hd" type device that does not use the SCSI subsystem.
+                # It probably isn't a good general solution.  Please let me know if you find an exception.
+                Target = "/".join(Sysfs_array[-2:])
+                Intermediate = ""
+
+        return Host, Intermediate, Target
+
+
+def ReturnSysfsValue(Sysfs, File):
+
+        """ 
+        Take a File in Sysfs, starting with the full Sysfs string, and recursing upwards until a match is
+        found, and then return the contents of the first matching file.
+        """
+
+        Array = Sysfs.split("/")
+
+        # Default return value
+        Contents = ERROR_SYSFS
+
+        while len(Array) > 0:
+
+                TestFile = "/".join(Array) + "/" + File
+
+                if not os.path.islink(TestFile) and not os.path.isfile(TestFile):
+                        Array = Array[:-1]
+                        continue
+
+                Contents = SysExec("cat " + TestFile)
+                break
+
+        return Contents
+
+
+##########################################################################################################
+# This section is primarily helper functions
+##########################################################################################################
+
+def Query_udevadm(SD_Device, Key):
+
+	"""
+	This function queries udevadm for the value of the chosen Key
+	"""
+
+	Val = "UNKNOWN"
+
+	# Create a mapping between a human-readible key and what udevadm actually returns for some common use cases.
+	Human_Readable_Mapping = { "Media":        "DEVTYPE",         \
+				   "Interconnect": "ID_BUS",          \
+				   "Model":        "ID_MODEL",        \
+			           "Vendor":       "ID_VENDOR",       \
+				   "Serial":       "ID_SERIAL_SHORT", \
+                                   "Firmware":     "ID_REVISION",     \
+                                   "Is_CDROM":     "ID_CDROM_CD",     \
+                                   "Is_DVD":       "ID_CDROM_DVD",    \
+                                   "Is_Bluray":    "ID_CDROM_BD"      }
+
+
+	# Get the machine-friendly version of the string.
+	if Human_Readable_Mapping[Key]:
+		Key = Human_Readable_Mapping[Key]
+
+        if UDEVADM_BIN.endswith("udevinfo"):
+                udev_cmd = UDEVADM_BIN + " -q env -n " + SD_Device
+        else:
+                udev_cmd = UDEVADM_BIN + " info --query=property --name=" + SD_Device
+
+	for line in SysExec(udev_cmd).splitlines():
+		if line.startswith(Key + "="):
+			Val = line.split("=")[1]
+
+	# Some machines only have the long form of the serial number
+	if Val == "UNKNOWN" and Key == "ID_SERIAL_SHORT":
+		Key = "ID_SERIAL"
+
+		for line in SysExec(udev_cmd).splitlines():
+			if line.startswith(Key + "="):
+				Val = line.split("=")[1]
+	
+	return Val
+	
+
+def Query_lspci(pciid):
+
+	"""
+	This function parses the Type, Mfg, and Name of the given pci-id using lspci
+	"""
+
+	# pciid normally looks like:  0000:80:07.0
+	# split it off to:                 80:07.0
+	
+	# This is is backwards-compatible with the 'tarded version of python in RHEL5
+	pciid_grep = pciid.split(":")
+	pciid_grep.pop(0)
+	pciid_grep = ":".join(pciid_grep)
+
+	DeviceType = "INVALID_PCI_ID"
+	DeviceMfg  = "INVALID_PCI_ID"
+	DeviceName = "INVALID_PCI_ID"
+
+ 	for line in SysExec(LSPCI_BIN + " -mm").splitlines():
+		if line.startswith(pciid_grep):
+		
+			DeviceType = line.split("\"")[1]
+			DeviceMfg  = line.split("\"")[3]
+			DeviceName = line.split("\"")[5]
+
+	return DeviceType, DeviceMfg, DeviceName
+
+
+def LookupInterconnect(string):
+
+	"""
+	This function is just a look-up table to convert strings from lspci to something a bit more useful
+	"""
+
+	Interconnect = "UNKNOWN"
+
+	if re.search("SATA controller:", string):
+		Interconnect = "SATA"
+	if (re.search("USB Controller:", string)) or (re.search("USB controller", string)):
+		Interconnect = "USB"
+	if re.search("Serial Attached SCSI controller:", string):
+		Interconnect = "SAS"
+	if re.search("SCSI storage controller:", string):
+		# SCSI occasionally lies to you.  Grep the string for SAS to be sure.
+		if re.search("SAS", string):
+			Interconnect = "SAS"
+		else:
+			Interconnect = "SCSI"
+	if re.search("Fibre Channel:", string):
+		Interconnect = "FC"
+	if re.search("FireWire", string) or re.search("IEEE 1394", string):
+		Interconnect = "FIREWIRE"
+	if re.search("InfiniBand:", string):
+		Interconnect = "INFINIBAND"
+
+	# If it reports back "IDE", that's a bit of an oddball.  Grep the line
+	# to see if it mentions SATA or "Serial ATA", otherwise the testing I've
+	# done shows it's fairly safe to assume it's PATA
+	if re.search("IDE interface:", string):
+		if (re.search("SATA", string)) or (re.search("Serial ATA", string)):
+			Interconnect = "SATA"
+		else:
+			Interconnect = "PATA"
+
+	# This is also another PITA instance.  The RAID hides the interconnect
+	# used.  Offhand I don't know to see through it, other than
+	# grep the "lspci" output and hope there's a keyword I can latch onto.
+	# Saving that for later though.
+	if re.search("RAID bus controller:", string):
+		Interconnect = "RAID"
+
+	return Interconnect
+
+
+##########################################################################################################
+# These functions use the helper functions above to do a lot of heavy lifting
+##########################################################################################################
+
+def FindKernelDriver(Sysfs):
+
+	"""
+	Given the /sys/devices entry for a block device, return the kernel driver it uses
+	Note that some devices can use multiple modules (Host -> Intermediate -> Target) 
+	so try to be smart about which driver is the "useful" one.
+	"""
+
+	driver = [ ]
+
+	sysarray = Sysfs.strip().split("/")
+
+	while len(sysarray) > 2:
+
+		testpath = "/".join(sysarray) + "/driver"
+
+		if os.path.islink(testpath):
+			this_driver = os.path.basename(os.readlink(testpath))
+			driver.append(this_driver)
+
+		sysarray = sysarray[0:-1]
+
+	if not driver:
+		return "NO_SUCH_DRIVE"
+	if driver[1]:
+		return driver[1].lower()
+	elif driver[0]:
+		return driver[0].lower()
+	else:
+		return "unknown"
+
+
+def FindSG_Device(SD_Device, Sysfs):
+
+        """ This function takes a /dev/sd* device, and maps it to its corresponding /dev/sg* device """
+
+        # If the input is actually a SD_Device, just return it
+        if SD_Device.startswith("/dev/sg"):
+                return SD_Device
+
+        sg_path = Sysfs.split("/")[:-2]
+        sg_path = "/".join(sg_path)
+        sg_path = sg_path + "/scsi_generic"
+
+        if os.path.isdir(sg_path):
+# Profiling shows this as a slow point. Changed to os.listdir for speed.
+#                p1 = SysExec("ls -1 " + sg_path)
+		p1 = os.listdir(sg_path)[0]
+                SG_Device = "/dev/" + p1
+        else:
+                SG_Device = "NO_SG_DEV"
+
+        return SG_Device
+
+
+def FindInterconnect(Sysfs):
+
+	"""
+	Return the interconnect used by the device (SATA/PATA/SAS/etc)
+	"""
+
+	(DEVICE_HOST, DEVICE_INTERMEDIATE, DEVICE_TARGET) = SplitSysfsString(Sysfs)
+
+	# The last element of DEVICE_HOST is usually (always?!) a PCI id pointing to
+	# the method the drive is connected to the host computer.  This may be
+	# a actual interconnect (usuallly SATA, PATA, or USB), or may be a bridge
+	# chip, in which case the PCI id of the actual interconnect will (always?!) be
+	# an element in DEVICE_INTERMEDIATE instead
+
+	# This happens if the drive specified isn't there (ie, they ask for /dev/sdcx, and there's no such drive
+	if Sysfs == "/sys/directory":
+		return "UNKNOWN", "UNKNOWN"
+
+	for foo_temp in DEVICE_HOST.split("/"):
+                        if re.search("0000:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f].[0-9a-f]", foo_temp):
+                                DEVICE_HOST_PCI_ADDRESS = foo_temp
+
+	if "DEVICE_HOST_PCI_ADDRESS" in vars():
+		(Head_DeviceType, Head_DeviceMfg, Head_DeviceName) = Query_lspci(DEVICE_HOST_PCI_ADDRESS)
+
+	for foo_temp in DEVICE_INTERMEDIATE.split("/"):
+                        if re.search("0000:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f].[0-9a-f]", foo_temp):
+                                DEVICE_INTERMEDIATE_PCI_ADDRESS = foo_temp
+
+	if "DEVICE_INTERMEDIATE_PCI_ADDRESS" in vars():
+		(Middle_DeviceType, Middle_DeviceMfg, Middle_DeviceName) = Query_lspci(DEVICE_INTERMEDIATE_PCI_ADDRESS)
+
+	if "Middle_DeviceType" in vars():
+		Interconnect = LookupInterconnect(Middle_DeviceType + ":" + Middle_DeviceName)
+		Interconnect_Info = Middle_DeviceName
+# Uncomment this if you want info on the bridge as well
+#		BlockDev.Interconnect_Info = Middle_DeviceName + " over a " + Head_DeviceName + " " + Head_DeviceType
+	else:
+		Interconnect = LookupInterconnect(Head_DeviceType + ":" + Head_DeviceName)
+		Interconnect_Info = Head_DeviceName
+
+	return Interconnect, Interconnect_Info
+
+
+def FindMediaType(SD_Device):
+
+	"""
+	Return the media type of the device as reported /sys/class/scsi_devices
+	I would like to eventually expand this to be smarter (for instance, being
+	able to discriminate between a HD, SSD, USB Flash, instead of
+	just considering all of them "disk".
+	"""
+
+	# Lookup taken from lsscsi source code
+	SCSI_MEDIA_TYPE = [ "disk   ", "tape   ", "printer", "process", "worm   ", "cd/dvd ",
+	                    "scanner", "optical", "mediumx", "comms  ", "(0xa)  ", "(0xb)  ",
+	                    "storage", "enclosu", "sim dsk", "opti rd", "bridge ", "osd    ",
+	                    "adi    ", "(0x13) ", "(0x14) ", "(0x15) ", "(0x16) ", "(0x17) ",
+	                    "(0x18) ", "(0x19) ", "(0x1a) ", "(0x1b) ", "(0x1c) ", "(0x1e) ",
+	                    "wlun   ", "no dev " ]
+
+
+	# On old /dev/hd* machines, you might be able to get the media this way
+	if SD_Device.startswith("/dev/hd"):
+		Media_BestGuess = "disk:hd"
+		hdfile = "/proc/ide/" + SD_Device.split("/")[-1] + "/media"
+		if os.path.isfile(hdfile):
+		       	p1 = SysExec("cat " + hdfile).strip()
+			if p1 == "cdrom":
+				Media_BestGuess = "cd/dvd"
+		return Media_BestGuess
+
+	MediaInt = Query_SysClassScsiDevice(SD_Device, "type")
+
+        if MediaInt == "UNKNOWN" and not SD_Device.startswith("/dev/hd"):
+		return "UNKNOWN"
+
+	Media = SCSI_MEDIA_TYPE[int(MediaInt)].strip()
+
+        # If Media is "disk", let's try to narrow it down (harddisk, ssd, etc.)
+	if Media == "disk":
+
+		ReadFile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/rotational"
+
+		if os.path.isfile(ReadFile) or os.path.islink(ReadFile):
+	        	is_rotating = int(SysExec("cat " + ReadFile).strip())
+	
+			# This is of necessity a guess...
+			if is_rotating == 1:	# Probably a hard disk			
+				Media = "disk:hd"
+			elif is_rotating == 0:
+				Media = "disk:ssd"
+
+
+        if Media == "cd/dvd":
+
+                Is_DVD    = Query_udevadm(SD_Device, "Is_DVD")
+                Is_Bluray = Query_udevadm(SD_Device, "Is_Bluray")
+
+                if not Is_Bluray == "UNKNOWN":
+                        Media = "bluray"
+                elif not Is_DVD == "UNKNOWN":
+                        Media = "dvd"
+                else:
+                        Media = "cdrom"
+
+
+
+	# It would be nice to be able to query the USB bus and determine if a
+	# block device is a hard drive, flash drive, SSD, CD-ROM, etc. 
+
+	# You can use "lsusb -t" to see if the device is "Self Powered" or "Bus Powered"
+	# and get a rough idea if it's a USB flash (bus powered) or anything else (self-powered)
+
+
+	#
+	# It would also be nice to be able to tell if "cd/dvd" is a cdrom,
+	# DVD, Blu-ray, etc.
+	#
+	# I haven't figured those tricks out yet...
+
+	return Media
+
+
+def FindRid(SD_Device):
+	"""
+	Return the L-Store Resource ID of the drive, if present
+	"""
+	# First, trim down the SD_Device
+	# ls -alh /dev/disk/by-label | grep sdz | grep data | tr " " "\n" | grep rid-data | cut -d "-" -f 3
+	# If rid is null, it doesn't have a RID, exit with nothing.
+	p1 = SysExec("ls -alh /dev/disk/by-label")
+	for line in p1.splitlines():
+		if re.search(SD_Device.split("/")[-1] + "2", line):
+			for entry in line.split():
+				if re.search("rid-data-", entry):
+					return re.sub("rid-data-", "", entry)
+	return "NORID"
+
+def findisRotating(SD_Device):
+	"""
+	Fetch "rotation" from /sys/block/DEV/queue/rotational
+	"""
+	File = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/rotational"
+	if os.path.isfile(File) or os.path.islink(File):
+		return SysExec("cat " + File).strip()
+	else:
+		return -1
+
+
+def findisRO(SD_Device):
+	"""
+	Fetch "ro" from /sys/block/DEV/ro
+	"""
+	File = "/sys/block/" + SD_Device.split("/")[-1] + "/ro"
+	if os.path.isfile(File) or os.path.islink(File):
+		return SysExec("cat " + File).strip()
+	else:
+		return -1
+
+
+def findisRemovable(SD_Device):
+	"""
+	Fetch "removable" from /sys/block/DEV/removable
+	"""
+
+	File = "/sys/block/" + SD_Device.split("/")[-1] + "/removable"
+	if os.path.isfile(File) or os.path.islink(File):
+		return SysExec("cat " + File).strip()
+	else:
+		return -1
+
+
+def findRawSize(SD_Device):
+	"""
+	Fetch raw device size (in bytes) by multiplying "/sys/block/DEV/queue/hw_sector_size"
+	by /sys/block/DEV/size
+	"""
+
+	secsize = "0"
+	numsec  = "0"
+
+	tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/size"
+	if os.path.isfile(tfile):
+		numsec = SysExec("cat " + tfile).strip()
+
+	tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/hw_sector_size"
+	if os.path.isfile(tfile):
+		secsize = SysExec("cat " + tfile).strip()
+
+	return int(numsec) * int(secsize)
+
+
+def FindUSBversion(Sysfs):
+
+        """
+        If this is a USB device, return the version of USB the device uses (1, 1.1, 2, 3, etc.)
+        """
+
+        USB_Version = "0"
+
+        if re.search("USB", Sysfs, re.I):
+                USB_Version = ReturnSysfsValue(Sysfs, "version")
+                USB_Version = re.sub("(0)*$","", USB_Version)
+                USB_Version = re.sub("\.$","", USB_Version)
+
+        return USB_Version.strip()
+
+
+def FindUSBbmAttributes(Sysfs):
+
+        """
+        # Determine if the machine is bus-powered (USB Flash) or self-powered (pretty much everything else)
+        # From:   http://www.beyondlogic.org/usbnutshell/usb5.shtml
+        """
+
+        bmAttributes  = "00"
+
+        if re.search("USB", Sysfs, re.I):
+                bmAttributes = ReturnSysfsValue(Sysfs, "bmAttributes")
+
+        return bmAttributes
+
+
+def HumanFriendlyBytes(bytes, scale, decimals):
+
+	"""
+	Convert a integer number of bytes into something legible (10 GB or 25 TiB)
+	Base 1000 units = KB, MB, GB, TB, etc.
+	Base 1024 units = KiB, MiB, GiB, TiB, etc.
+	"""
+
+	AcceptableScales = [ 1000, 1024 ]
+
+	if not scale in AcceptableScales:
+		return "ERROR"
+
+	unit_i = int(math.floor(math.log(bytes, scale)))
+
+	if scale == 1000:
+		UNITS = [ "B",  "KB",  "MB",  "GB",  "TB",  "PB",  "EB",  "ZB",  "YB" ]
+	if scale == 1024:
+		UNITS = [ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB" ]
+
+	scaled_units = UNITS[unit_i]
+	scaled_size = round(bytes / math.pow(scale, unit_i), decimals)
+
+	return str(scaled_size) + " " + scaled_units
+
+
+def HumanFriendlyVendor(Vendor, Model):
+
+        """
+        Return the Vendor string for the media (Seagate, Hitachi, etc.)
+        Note that this isn't as straightforward as you'd hope because
+        many vendors are quite loose with the standards.  This is meant to be
+        human-friendly, and you should always use the raw query instead when
+        trying to match something.
+        """
+
+        # udev likes to use underscores instead of spaces, so change that here.
+        Vendor = re.sub("_", " ", Vendor)
+        Model  = re.sub("_", " ", Model)
+
+        # Ok, sometimes they like to put the vendor in the model field
+        # so try to fix some of the more egregious ones
+        if Vendor == "ATA" or Vendor == "ATAPI" or Vendor == "UNKNOWN":
+
+                if re.search("Hitachi", Model, re.I):
+                        Vendor = "Hitachi"
+
+                if re.search("Fujitsu", Model, re.I):
+                        Vendor = "Fujitsu"
+
+                if re.search("Maxtor", Model, re.I):
+                        Vendor = "Maxtor"
+
+                if re.search("MATSHITA", Model, re.I):
+                        Vendor = "Matshita"
+
+                if re.search("LITE-ON", Model, re.I):
+                        Vendor = "Lite-On"
+
+                if Model.startswith("WDC"):
+                        Vendor = "WDC"
+
+                if Model.startswith("INTEL"):
+                        Vendor = "Intel"
+
+                if Model.startswith("OCZ"):
+                        Vendor = "OCZ"
+
+                if Model.startswith("Optiarc"):
+                        Vendor = "Optiarc"
+
+        # Seagate is all the fark over the place...
+        if Vendor.startswith("ST"):
+                Vendor = "Seagate"
+
+        if Model.startswith("ST"):
+                Vendor = "Seagate"
+
+        if re.search("Toshiba", Model, re.I):
+                Vendor = "Toshiba"
+
+        if re.search("Maxtor", Vendor, re.I):
+                Vendor = "Maxtor"
+
+        if re.search("LITE-ON", Vendor):
+                Vendor = "Lite-On"
+
+        # If it's still set to ATAPI or ATA, then it's a unknown
+        # vendor who's *really* lax on following standards.
+        if Vendor == "ATAPI" or Vendor == "ATA":
+                Vendor = "unknown"
+
+        return Vendor.strip()
+
+
+
+def HumanFriendlyModel(SD_Device, Vendor, Model):
+
+        """
+        Return the Model string for the media
+        Note that this isn't as straightforward as you'd hope because
+        many vendors are quite loose with the standards  This is meant to be
+        human-friendly, and you should always use the raw query instead when
+        trying to match something.
+
+        """
+
+        # udev likes to use underscores instead of spaces, so change that here.
+        Vendor = re.sub("_", " ", Vendor)
+        Model  = re.sub("_", " ", Model)
+
+        # Ok, sometimes they like to put the vendor in the model field
+        # so try to fix some of the more egregious ones
+        if re.search("Hitachi", Model, re.I):
+                Model = re.sub("Hitachi","", Model).strip()
+                Model = re.sub("HITACHI","", Model).strip()
+
+        if re.search("Fujitsu", Model, re.I):
+                Model = re.sub("Fujitsu","", Model).strip()
+                Model = re.sub("FUJITSU","", Model).strip()
+
+        if re.search("Maxtor", Model, re.I):
+                Model = re.sub("Maxtor","", Model).strip()
+                Model = re.sub("MAXTOR","", Model).strip()
+
+        if re.search("Matshita", Model, re.I):
+                Model = re.sub("Matshita","", Model).strip()
+                Model = re.sub("MATSHITA","", Model).strip()
+
+        if re.search("LITE-ON", Model, re.I):
+                Model = re.sub("Lite-On","", Model).strip()
+                Model = re.sub("LITE-ON","", Model).strip()
+
+        if Model.startswith("WDC"):
+                Model = re.sub("^WDC", "", Model).strip()
+
+        if Model.startswith("INTEL"):
+                Model = re.sub("^INTEL", "", Model).strip()
+
+        if Model.startswith("OCZ-"):
+                Model = re.sub("^OCZ-", "", Model).strip()
+
+        if Model.startswith("Optiarc"):
+                Model = re.sub("^Optiarc", "", Model).strip()
+
+        if Vendor.startswith("ST"):
+                Model = Vendor + Model
+
+        if Model.startswith("TOSHIBA"):
+                Model = re.sub("^TOSHIBA ", "", Model).strip()
+
+
+        if Vendor.startswith("MAXTOR"):
+                Model = re.sub("^MAXTOR ", "", Vendor + Model).strip()
+
+        if Model.startswith("ATAPI"):
+                Model = re.sub("^ATAPI", "", Model)
+
+        # Finally, if it's an old-style /dev/hd device, try looking under proc
+        if Model == "unknown" and SD_Device.startswith("/dev/hd"):
+
+                hdfile = "/proc/ide/" + SD_Device.split("/")[-1] + "/model"
+
+                if os.path.isfile(hdfile):
+                        Model = SysExec("cat " + hdfile).strip()
+
+        return Model.strip()
+
+
+
+def HumanFriendlySerial(Serial, Vendor, Model):
+
+        """
+        Try to de-crapify the Serial Number (again, polluted with other fields)
+        """
+
+        NO_SERIAL = "NO_SERIAL"
+
+        if Serial == Model:
+                return NO_SERIAL
+
+        Serial = Serial.split("_")[-1]
+
+        Serial = re.sub("^SATA","", Serial)      # one drive starts with "SATA_"
+        Serial = re.sub(Model,"", Serial)        # Filter out the model
+        Serial = re.sub(Model[:-1],"", Serial)   # Filter out the model (catches an edge case with WDC <bangs head>)
+        Serial = re.sub(Vendor, "", Serial)      # Filter out the Vendor
+        Serial = re.sub("^(_)*","", Serial)      # Filter out leading "_"
+        Serial = re.sub("(_)*$","", Serial)      # Filter out trailing "_"
+        Serial = re.sub("^-", "", Serial)        # Another edge case... (WDC...)
+        Serial = re.sub("^WD-", "", Serial)      # Yet another WDC edge case... 
+        Serial = Serial.strip()                  # and strip
+
+        if not Serial:
+                Serial = "NO_SERIAL"
+
+        return Serial
+
+
+
+def CallSMART(SD_Device, Verb):
+
+	VALID_VERBS = [ "test", "status" ]
+	
+	# If it isn't a valid Verb, just return the current value
+	if not Verb in VALID_VERBS:
+		return False
+
+	if Verb == "test":
+		SysExec(SMARTCTL_BIN + " -t short " + SD_Device)
+		return
+
+	if Verb == "status":
+
+		# This can can detect completely dead drives (ie, they no longer show up in the OS)
+		# and slightly dead drives that are failing with SMART errors.   It may not detect
+		# some of the weird in-between cases.
+
+		DRIVE_OK      = 0  # Looks good
+		DRIVE_TESTING = 1  # The SMART test is still being run
+		DRIVE_FAILING = 2  # If you hurry you can pull data off it.
+		DRIVE_FAILED  = 3  # It's dead, Jim
+
+		# By default, it's a happy shiny drive with nothing wrong...
+		SMART_STATUS  = DRIVE_OK
+
+		# Pretty much by definition, if the drive isn't there anymore, it's failed.
+		if not os.path.exists(SD_Device):
+			SMART_STATUS = DRIVE_FAILED
+		else:
+
+			# Get the output from smartctl and sift it for information
+			for line in SysExec(SMARTCTL_BIN + " -a " + SD_Device).splitlines():
+				if re.search("SMART overall-health self-assessment test result: FAILED!", line)     \
+ 				or re.search("Drive failure expected in less than 24 hours. SAVE ALL DATA.", line) \
+        	                or re.search("FAILING_NOW", line)						    \
+				or re.search("a test element that failed and the", line)			    \
+				or re.search("the read element of the test failed", line)			    \
+				or re.search("element that failed is not known", line):
+					SMART_STATUS = DRIVE_FAILING
+					break
+
+				if re.search("Self-test routine in progress...", line):
+					SMART_STATUS = DRIVE_TESTING
+
+		return SMART_STATUS
+
+
+####################################################
+## Here are the parameters I want to print 
+## (you should be able to use any in the BlockDevice class, 
+## though there are several I haven't tested.
+####################################################
+
+BlockDeviceParameters = [                        \
+			  "SD_Device",           \
+			  "RID",		 \
+			  "SG_Device",           \
+			  "KernelDriver",        \
+			  "HumanFriendlyVendor", \
+			  "HumanFriendlyModel",  \
+			  "HumanFriendlySerial", \
+			  "MediaType",           \
+			  "Firmware",            \
+			  "Interconnect",         \
+                          "RawSize",             \
+#                         "isSelfPowered",       \
+#                         "isRotating",          \
+#			  "isReadonly",          \
+#			  "isRemovable",         \
+#			  "isMounted"
+		        ]
+
+
+#####################################################
+# With somp parameters I want to change the name when
+# printing to make them a little prettier.
+#####################################################
+PrettyHeaders = []
+
+PrettyHeaderMap = { \
+		    "SD_Device":           "Dev",      \
+		    "RID":		   "RID",      \
+                    "SG_Device":           "SG",       \
+                    "KernelDriver":        "Driver",   \
+                    "HumanFriendlyVendor": "Vendor",   \
+                    "HumanFriendlyModel":  "Model",    \
+                    "HumanFriendlySerial": "Serial",   \
+                    "MediaType":           "Media",    \
+                    "Interconnect":        "Bus",      \
+		    "isSelfPowered":         "Pow",      \
+		    "isRotating":          "Rot",      \
+		    "isReadonly":          "RO",       \
+		    "isRemovable":         "Remov",    \
+		    "isMounted":           "Mnt"
+                  }
+
+for param in BlockDeviceParameters:
+        if param in PrettyHeaderMap:
+                PrettyHeaders.append(PrettyHeaderMap[param])
+        else:
+                PrettyHeaders.append(param)
+
+
+#####################################################
+## Get an array of block devices, filtering out the
+## weirder ones (virtual and composite devices)
+#####################################################
+ValidBlockDevices = []
+
+devlist = os.listdir("/sys/block")
+
+for item in devlist:
+
+        # Ignore /dev/ram*, /dev/loop*, and other annoying, useful block devices
+        if item.startswith("ram"):      # Ram
+                continue
+        if item.startswith("loop"):     # Loopbacks
+                continue
+        if item.startswith("dm-"):      # Logical Volume
+                continue
+        if item.startswith("md"):       # Software raid
+                continue
+        if item.startswith("fd"):       # Floppy drives
+                continue
+        if item.startswith("zram"):     # ZRam compressed ramdisk/swap
+                continue
+
+
+        ValidBlockDevices.append(item)
+
+
+#####################################################
+## Sort the ValidBlockDevice array to make it 
+## prettier and more helpful (ie, sda before sdc before sdab)
+#####################################################
+min_length = 100
+max_length = 0
+
+for device in ValidBlockDevices:
+        min_length = min(min_length, len(device))
+        max_length = max(max_length, len(device))
+
+TmpValidBlockDevices = []
+
+for l in range(min_length, max_length + 1):
+
+        SortDevices = []
+
+        for device in ValidBlockDevices:
+                if not len(device) == l:
+                        continue
+                SortDevices.append(device)
+
+        SortDevices.sort()
+
+        TmpValidBlockDevices = TmpValidBlockDevices + SortDevices
+
+ValidBlockDevices = TmpValidBlockDevices
+
+
+#####################################################
+# Populate a dictionary with the BlockDevice values for all devices
+#####################################################
+BlockDeviceInfo = {}
+
+# This loop is the slowest part of the whole program.  
+# Figure out why and fix it...
+for device in ValidBlockDevices:
+        BlockDeviceInfo[device] = BlockDevice("/dev/" + device)
+
+
+#####################################################
+# Find the max length of each parameter so we can create a
+# FORMAT string for pretty-printing purposes...
+#####################################################
+ParamLength = {}
+for param in BlockDeviceParameters:
+
+        if param in PrettyHeaderMap:
+	        ParamLength[param] = PrettyHeaderMap[param].__len__()
+        else:
+		ParamLength[param] = param.__len__()
+
+
+for device in ValidBlockDevices:
+        for param in BlockDeviceParameters:
+		t = getattr(BlockDeviceInfo[device], param)
+		if isinstance(t, str):
+			ValueLength = t.__len__()
+		elif isinstance(t, int):
+			ValueLength = math.log10(float(t) + 0.001)
+			if ValueLength < 0:
+				ValueLength = 1
+			ValueLength = int(math.floor(ValueLength))
+
+		ParamLength[param] = max(ValueLength, ParamLength[param])
+
+
+TOTALLENGTH = 0
+FORMAT=""
+for param in BlockDeviceParameters:
+        FORMAT = FORMAT + " %-" + str(ParamLength[param] + 2) + "s "
+        TOTALLENGTH = TOTALLENGTH + ParamLength[param] + 4
+TOTALLENGTH = TOTALLENGTH - 2
+
+
+#####################################################
+# Print it and go home...
+#####################################################
+print
+print FORMAT % tuple(PrettyHeaders)
+print "=" * TOTALLENGTH
+
+for device in ValidBlockDevices:
+        printline = []
+        for param in BlockDeviceParameters:
+                printline.append(getattr(BlockDeviceInfo[device], param))
+
+        print FORMAT % tuple(printline)
+
+print
