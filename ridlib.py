@@ -826,7 +826,7 @@ def IBP_Server_Stop():
 	print("Completed shutdown.")
 
 
-def RID_List():
+def RID_List(arguments=""):
 
 	# How we want to format our output
 	FORMAT="%-6s %4s  %-13s %-11s  %-25s %-25s"
@@ -837,7 +837,7 @@ def RID_List():
 			rid_list.append(line.split("-")[1])
 	rid_list.sort()
 
-	if "-rid-only" not in sys.argv:
+	if ("-rid-only" not in sys.argv) and (arguments != "-rid-only"):
 		print FORMAT % ("RID", "Type", "Data", "Metadata", "Import Metadata", "Sequester Status")
 		print FORMAT % ("-----", "----", "-----------", "-----------", "----------------------", "-----------------")
 
@@ -865,6 +865,8 @@ def RID_List():
 		if len(sys.argv) > 1:
 			if sys.argv[1] == "-rid-only":
 				print(rid)
+		elif arguments == "-rid-only":
+			print(rid)
 		else:
 			print FORMAT % (rid.rjust(2), mount_type.rjust(2), data_dev.rjust(2), metadata_dev.rjust(2), import_status.rjust(2), sequester_status)
 
@@ -872,7 +874,7 @@ def RID_List():
 
 def RID_Merge_Config():
 
-	ibp_conf_file = depot_dir + "/mat-ibp.conf"
+	ibp_conf_file = depot_dir + "/ibp.conf"
 
 	f = open(ibp_conf_file, "w")
 
@@ -892,7 +894,10 @@ def RID_Merge_Config():
 	f.write(t.read())
 	t.close()
 
-	rid_list = SysExec("list_resources -rid-only")
+#	rid_list = SysExec("list_resources -rid-only")
+	rid_list = SysExec("./list_rid.py")
+#	rid_list = RID_List(arguments="-rid-only")
+
 	for rid in rid_list.splitlines():
 
 		cfg = depot_dir + "/import/md-" + rid + "/rid.settings"
@@ -1176,7 +1181,7 @@ def Smart_Attributes(Dev):
 			if re.search("^Manufactured in", line):
 				t = re.sub("Manufactured in ", "", line)
 				t = re.sub(" of year ", ",", t)
-				t = re.sub(" " "_", t)
+				t = re.sub(" ", "_", t)
 				Drive_Attributes[9001] = "9001_SAS_Manufacture_Date 0 0 0 " + t
 
 			if re.search("^read:", line):
@@ -1261,6 +1266,9 @@ def Query_Drives_Smart_Attributes(Query):
 			continue
 
 		if re.search("^ram", line):
+			continue
+
+		if re.search("^dm-", line):
 			continue
 
 		Dev    = "/dev/" + line
