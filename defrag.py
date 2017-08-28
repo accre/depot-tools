@@ -36,7 +36,6 @@ for Dir in os.listdir(Depot_Dir):
 		continue
 	Rids.append(Dir.split("-")[1])
 
-
 logging.debug("Rids = " + str(Rids))
 
 if __name__ == '__main__':

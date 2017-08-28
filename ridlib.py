@@ -841,11 +841,14 @@ def RID_List(arguments=""):
 		print FORMAT % ("RID", "Type", "Data", "Metadata", "Import Metadata", "Sequester Status")
 		print FORMAT % ("-----", "----", "-----------", "-----------", "----------------------", "-----------------")
 
+	info = []
+
 	for rid in rid_list:
 
-		f = open(depot_dir + "/rid-" + str(rid) + "/rid.info" , 'r')
-		info = f.read().split(":")
-		f.close()
+		if os.path.isfile(depot_dir + "/rid-" + str(rid) + "/rid.info"):
+			f = open(depot_dir + "/rid-" + str(rid) + "/rid.info" , 'r')
+			info = f.read().split(":")
+			f.close()
 
 		sequester_status = "NOT_SEQUESTERED"
 		if os.path.isdir(depot_dir + "/import/md-" + str(rid)):
@@ -854,17 +857,23 @@ def RID_List(arguments=""):
 				sequester_status = f.readlines()[-1].strip()
 				f.close
 
-		mount_type   = info[0].strip()
-		data_dev     = info[2].strip()
-		metadata_dev = info[1].strip()
-
+		mount_type    = "UNKNOWN"
+		data_dev      = "UNKNOWN"
+		metadata_dev  = "UNKNOWN"
 		import_status = "NOT_IMPORTED"
-		if len(info) == 4:
-			import_status = info[3].strip()
+
+		if info:
+			mount_type   = info[0].strip()
+			data_dev     = info[2].strip()
+			metadata_dev = info[1].strip()
+
+			if len(info) == 4:
+				import_status = info[3].strip()
 
 		if len(sys.argv) > 1:
 			if sys.argv[1] == "-rid-only":
 				print(rid)
+
 		elif arguments == "-rid-only":
 			print(rid)
 		else:

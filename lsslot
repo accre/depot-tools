@@ -9,6 +9,7 @@ Display a table showing which hard drive is in each slot on a depot.
 import re
 import time
 import socket
+import os
 #import os
 #import stat
 
@@ -123,18 +124,20 @@ def Get_ChassisBackplane():
 
 	Backplanes = []
 
-	output_backplanes = SysExec("ls -1 /sys/class/enclosure")
+	if os.path.isdir("/sys/class/enclosure"):
 
-	for bus in output_backplanes.splitlines():
+		output_backplanes = SysExec("ls -1 /sys/class/enclosure")
 
-		Vendor = SysExec("cat /sys/class/enclosure/" + bus + "/device/vendor").strip()
-		Model  = SysExec("cat /sys/class/enclosure/" + bus + "/device/model").strip()
+		for bus in output_backplanes.splitlines():
 
-		Debug("Get_ChassisBackplane():: Detected backplane " + Vendor + " " + Model)
+			Vendor = SysExec("cat /sys/class/enclosure/" + bus + "/device/vendor").strip()
+			Model  = SysExec("cat /sys/class/enclosure/" + bus + "/device/model").strip()
 
-		Backplanes.append(Vendor + " " + Model)
+			Debug("Get_ChassisBackplane():: Detected backplane " + Vendor + " " + Model)
 
-	Debug("def Get_ChassisBackplane() entry")
+			Backplanes.append(Vendor + " " + Model)
+
+		Debug("def Get_ChassisBackplane() entry")
 
 	return Backplanes
 
