@@ -1042,7 +1042,7 @@ def RID_Fsck(Rid):
 
 	Dev = Rid_to_Dev[Rid]
 
-	logging.debug("RID_Fsck:: Rid " + Rid + " belongs to Dev " + Dev)
+	logging.debug("RID_Fsck::  Rid " + Rid + " belongs to Dev " + Dev)
 
 	Partitions = []
 	for i in range(0,255):
