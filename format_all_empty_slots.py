@@ -36,7 +36,7 @@ StartRid = 1501
 
 # This depot
 Depot = re.sub("cms-depot", "", socket.gethostname().split(".")[0])
-Depot = "73" # Testing this on lio-demo, so cheat here
+#Depot = "73" # Testing this on lio-demo, so cheat here
 ThisStartRid = 1501 + 36*int(Depot) - StartDepot
 
 # Generate Rid <-> Dev dicts

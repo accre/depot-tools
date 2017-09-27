@@ -337,7 +337,7 @@ def purge(dir, pattern):
 
 def RID_Mount(Rid):
 
-	logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+	logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
 
 	logging.debug("RID_Mount:: Performing mount operation on Rid: " + Rid)
 
@@ -748,23 +748,27 @@ def IBP_Server_Start():
 			cfg = arg
 			break
 
+	logging.debug("cfg = " + cfg)
+
 	nthreads = 0
 	nres = 0
 	nres_list = []
 
-	f = open(cfg, 'r')
+	if os.path.isfile(cfg):
 
-	for line in f.read().splitlines():
+		f = open(cfg, 'r')
 
-		if re.search("threads", line):
-			logging.debug("nthreads line from cfg = " + line)
-			nthreads = line.split("=")
-			nthreads = nthreads[1].strip()
+		for line in f.read().splitlines():
 
-		if re.search("^\\[resource ", line) and line not in nres_list:
-			nres += 1
-			nres_list.append(line)
-	f.close()
+			if re.search("threads", line):
+				logging.debug("nthreads line from cfg = " + line)
+				nthreads = line.split("=")
+				nthreads = nthreads[1].strip()
+
+			if re.search("^\\[resource ", line) and line not in nres_list:
+				nres += 1
+				nres_list.append(line)
+		f.close()
 
 	nfd = resource.getrlimit(resource.RLIMIT_NOFILE)
 	nfd = nfd[0]
@@ -904,8 +908,7 @@ def RID_Merge_Config():
 	t.close()
 
 #	rid_list = SysExec("list_resources -rid-only")
-	rid_list = SysExec("./list_rid.py")
-#	rid_list = RID_List(arguments="-rid-only")
+	rid_list = SysExec("./list_rid.py -rid-only")
 
 	for rid in rid_list.splitlines():
 
