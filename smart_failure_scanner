@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+
+attr=`mktemp`
+
+# Save /dev/ to rid map
+lsslot=`mktemp`
+lsslot > ${lsslot}
+
+lsblock=`mktemp`
+lsblock > ${lsblock}
+
+blkid=`mktemp`
+blkid > ${blkid}
+
+for dev in `cat ${lsblock} | grep "disk" | awk '{ print $1 }'`
+do
+
+	# Determine if it's a ssd or hard drive
+	disk_type=`cat ${lsblock} | grep " ${dev} " | tr " " "\n" | grep "disk:" | cut -d ":" -f 2`
+
+	# If it's a hard drive, fetch the rid (I should rewrite this to handle hard drives which *aren't* rids...)
+	rid="norid"
+	if [ "${disk_type}" == "hd" ]; then
+		rid=`cat ${lsslot} | grep "${dev} " | awk '{ print $10 }' | uniq`
+
+		if [ -z "${rid}" -o "${rid}" == "norid" -o "${rid}" == "NORID" -o "${rid}" == "Empty" ]; then
+			rid=`cat ${lsblock} | grep " ${dev} " | awk '{ print $2 }' | uniq`
+		fi
+
+
+		if [ -z "${rid}" -o "${rid}" == "norid" -o "${rid}" == "NORID" -o "${rid}" == "Empty" ]; then
+			rid=`cat ${blkid} | grep "^${dev}[12]" | tr " " "\n" | grep rid | grep data | cut -d "-" -f 3 | sed "s/\"//g"`
+		fi
+
+	fi
+
+	HD_Size=`cat ${lsblock} | grep " ${dev} " | awk '{ print $11 }'`
+	HD_Model=`cat ${lsblock} | grep " ${dev} " | awk '{ print $6 }'`
+
+	HD_Capacity="UNKNOWN"
+	case ${HD_Size} in
+		40020664320)
+			HD_Capacity="40 GB" ;;
+		60022480896)
+			HD_Capacity="60 GB" ;;
+		115033153536)
+			HD_Capacity="115 GB" ;;
+		120034123776)
+			HD_Capacity="120 GB" ;;
+		240057409536)
+			HD_Capacity="240 GB" ;;
+		2000398934016)
+			HD_Capacity="2 TB" ;;
+		3000592982016)
+			HD_Capacity="3 TB" ;;
+		4000787030016)
+			HD_Capacity="4 TB" ;;
+		8001563222016)
+			HD_Capacity="8 TB" ;;
+	esac
+
+	# How to determine if a drive is SATA or SAS.  At some point we need to improve this...
+	SAS=0
+	if [[ "${HD_Model}" =~ "ST8000NM0075" ]]; then
+		SAS=1
+	fi
+	if [[ "${HD_Model}" =~ "ST8000NM0065" ]]; then
+		SAS=1
+	fi
+	if [[ "${HD_Model}" =~ "ST4000NM0023" ]]; then
+		SAS=1
+	fi
+	if [[ "${HD_Model}" =~ "WD4000F9YZ" ]]; then
+		SAS=1
+	fi
+
+	if [ "${SAS}" -eq "0" ]; then
+
+		# These are SMART attributes that we don't want to alert if they are marginal/failing
+		IGNORE_THESE_ATTRIBUTES="High_Fly_Writes|Load_Cycle_Count"
+
+		# Fetch info on the remaining SMART attributes...
+		smartctl --attributes ${dev} | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | egrep -v "(${IGNORE_THESE_ATTRIBUTES})" > ${attr}
+
+		# Fetch the SMART self-test execution status
+		status=`smartctl -a ${dev} | grep -A 5 "Self-test execution status" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/"`
+
+		if [[ "${status}" =~ "The previous self-test completed having the read element of the test failed" ]]; then
+			printf "Dev %-9s Rid ${rid} is failing a read-element test ${RMA_Status}\n" ${dev}
+		fi
+
+		if [[ "${status}" =~ "The previous self-test completed having a test element that failed and the test element that failed is not known" ]]; then
+			printf "Dev %-9s Rid ${rid} is failing a test-element test ${RMA_Status}\n" ${dev}
+		fi
+
+		# Iterate over all SMART attributes
+		for attribute in `cat ${attr} | grep "^[1-9]" | cut -d " " -f 1`
+		do
+
+			  ATTR_NAME=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 2`
+			CURRENT_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 3 | sed "s/^0*//"` ; [ -z "${CURRENT_VAL}" ] && CURRENT_VAL=0
+			MAXIMUM_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 4 | sed "s/^0*//"` ; [ -z "${MAXIMUM_VAL}" ] && MAXIMUM_VAL=0
+			 THRESH_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 5 | sed "s/^0*//"` ; [ -z "${THRESH_VAL}"  ] && THRESH_VAL=0
+			   REAL_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 6 | sed "s/^0*//"` ; [ -z "${REAL_VAL}"    ] && REAL_VAL=0
+
+			################################
+			### Begin special case handling
+			################################
+
+			# This is a corner case where the val and thresh are all 0.  Just ignore
+			if [ "${CURRENT_VAL}" -eq "0" -a "${MAXIMUM_VAL}" -eq "0" -a "${THRESH_VAL}" -eq "0" ]; then
+				# There's no good way to know if the drive is actually failing, or if this test is screwy.  Just skip.
+				continue
+			fi
+
+			# One Intel SSD has a buggy 233 Media_Wearout_Indicator, so ignore that special case
+			is_bad_intel_ssd=`cat ${lsblock} | grep " ${dev} " | grep SSDSA2M040G2GC | wc -l`
+			if [ "${attribute}" -eq "233" -a "${is_bad_intel_ssd}" -eq "1" ]; then
+				continue
+			fi
+
+			# This is another indicator of a drive going bad that doesn't officially fail SMART
+			THRESH_197="500"
+			if [ "${attribute}" -eq "197" ]; then
+				if [ "${REAL_VAL}" -ge "${THRESH_197}" ]; then
+					printf "Dev %-9s Rid ${rid} has a 197_Current_Pending_Sector value over ${THRESH_197} ${RMA_Status}\n" ${dev}
+				fi
+			fi
+
+			################################
+			### End special case handling
+			################################
+
+			DELTA_CURRENT=`echo "${CURRENT_VAL}-${THRESH_VAL}" | bc -l`
+
+			if [ "${DELTA_CURRENT}" -le "0" ]; then
+				printf "Dev %-9s Rid ${rid} ${disk_type} is failing  on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
+			elif [ "${DELTA_CURRENT}" -lt "10" -a "${DELTA_CURRENT}" -gt 0 -a "${THRESH_VAL}" -lt "50" ]; then
+				printf "Dev %-9s Rid ${rid} ${disk_type} is marginal on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
+			fi
+		done
+	else
+		# Assume drive is SAS
+
+		Defects=`smart_attributes.py ${dev} | grep 9000_SAS_Grown_Defect_List | awk '{ print $2 }'`
+
+		if [ "${Defects}" -gt "0" ]; then
+
+			if [ "${Defects}" -gt "50" ]; then
+				printf "Dev %-9s Rid ${rid} has a critically-high number of defects (${Defects} defects)\n" ${dev}
+			else
+				printf "Dev %-9s Rid ${rid} has a non-zero number of defects (${Defects} defects)\n" ${dev}
+			fi
+		fi
+
+	fi
+done
+
+rm -f ${attr} ${lsslot} ${lsblock} ${blkid}

@@ -1158,7 +1158,7 @@ def Smart_Attributes(Dev):
 	f.close()
 
 	# How to determine if a drive is SATA or SAS.  At some point we need to improve this...
-	SAS_Models = [ "ST8000NM0075", "ST4000NM0023", "WD4000F9YZ" ]
+	SAS_Models = [ "ST8000NM0075", "ST4000NM0023", "WD4000F9YZ", "ST8000NM0065" ]
 	SAS=0
 	if Model in SAS_Models:
 		SAS = 1
