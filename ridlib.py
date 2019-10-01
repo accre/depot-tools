@@ -12,6 +12,7 @@ import time
 import stat
 import psutil
 import shutil
+import signal
 import random
 import logging
 import resource
@@ -19,10 +20,10 @@ import tempfile
 import subprocess
 import collections
 import ConfigParser
+import multiprocessing
 
-from subprocess import Popen, PIPE, STDOUT, call
-from time import gmtime, strftime
-from subprocess import check_output
+from subprocess import Popen, PIPE, STDOUT, call, check_output
+from time import gmtime, strftime, sleep
 
 depot_dir = "/depot"  # This was originally shared via the depot_common file.
 
@@ -227,7 +228,6 @@ def LastLine(file):
 	LastLine = "NOT_SEQUESTERED"
 
 	if len(output) != 0:
-		logging.debug("len(LastLine) = " + str(len(output)))
 		LastLine = output[-1].strip()
 
 	return LastLine
@@ -354,6 +354,11 @@ def RID_Mount(Rid):
 
 	if Rid not in Dict_Rid_to_Dev:
 		logging.error("RID_Mount:: Rid " + Rid + " does not appear to be a valid rid.  Exiting.")
+		sys.exit(1)
+
+	Sequester_status = RID_Check_Sequester(Rid)
+	if RID_Check_Sequester(Rid).split()[0] == "SEQUESTERED":
+		logging.error("RID_Mount:: Rid " + Rid + " is sequestered and will not be mounted.  Exiting.")
 		sys.exit(1)
 
 	Dev = Dict_Rid_to_Dev[Rid]
@@ -676,6 +681,8 @@ def IBP_Server_Status():
 
 	import psutil
 
+	logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
+
 	name = ""
 	pid = 0
 	# See if ibp_server is currently running, and kill it if it is.
@@ -685,7 +692,7 @@ def IBP_Server_Status():
 			pid = proc.pid
 			break
 
-	print("DEBUG:  Name = " + str(name) + " and PID = " + str(pid))
+	logging.debug("Name = " + str(name) + " and PID = " + str(pid))
 
 
 def IBP_Server_Start():
@@ -907,8 +914,7 @@ def RID_Merge_Config():
 	f.write(t.read())
 	t.close()
 
-#	rid_list = SysExec("list_resources -rid-only")
-	rid_list = SysExec("./list_rid.py -rid-only")
+	rid_list = SysExec("list_rid.py -rid-only")
 
 	for rid in rid_list.splitlines():
 
@@ -929,11 +935,13 @@ def RID_Check_Sequester(Rid):
 	# * New style (metadata on ssd)
 	# * Old style (metadata on data disk)
 	#
-	# If the metadata is on the data disk, we may need
+	# If the metadata is on the data disk and not currently mounted, we may need
 	# to mount then unmount it.
 	Unmount_Later = 0
 
 	Metadata_Location = LocateMetadata(Rid)
+
+	logging.debug("RID_Check_Sequester::  Metadata_Location = " + Metadata_Location)
 
 	if re.search("^UNKNOWN", Metadata_Location):
 		logging.error("RID_Check_Sequester:: Path to Rid metadata cannot be determined.  Exiting.")
@@ -943,26 +951,42 @@ def RID_Check_Sequester(Rid):
 		Metadata_Path = Metadata_Location.split(":")[1]
 
 	if re.search("^BLOCKDEV", Metadata_Location):
+		MD_Partition = Metadata_Location.split(":")[1] + "1"
+		logging.debug("RID_Check_Sequester:: Metadata Partition = " + MD_Partition)
 
 		Dict_Rid_To_Dev = Generate_Rid_to_Dev_Dict()
 		Dev = Dict_Rid_To_Dev[Rid]
-		Metadata_Path = tempfile.mkdtemp()
-		mount_unix(Dev + "1", Metadata_Path)
-		Unmount_Later = 1
+
+		if not is_partition_mounted(MD_Partition):
+			logging.debug("RID_Check_Sequester:: Metadata partition is unmounted.  Mounting to check import...")
+			Metadata_Path = tempfile.mkdtemp()
+			mount_unix(Dev + "1", Metadata_Path)
+		else:
+			logging.debug("RID_Check_Sequester:: Metadata partition is mounted.  Checking import and then leaving mounted.")
+			mounts = SysExecUncached("mount")
+			for line in mounts.splitlines():
+				if re.search(MD_Partition + " ", line):
+					Metadata_Path = line.split(" ")[2]
+					break
+			Unmount_Later = 1
+
+	logging.debug("RID_Check_Sequester:: Metadata_Path = " + Metadata_Path)
 
 	Sequester_file = Metadata_Path + "/SEQUESTER_STATUS"
 
-	if os.path.isfile(Sequester_file):
-		return LastLine(Sequester_file)
-	else:
-		return "NOT_SEQUESTERED"
+	logging.debug("RID_Check_Sequester:: Sequester_file = " + Sequester_file)
 
-	if Unmount_Later == 1:
+	Output = "NOT_SEQUESTERED"
+	if os.path.isfile(Sequester_file):
+		Output = LastLine(Sequester_file)
+
+	if re.search("^BLOCKDEV", Metadata_Location) and Unmount_Later == 0:
 		umount_unix(Metadata_Path)
 		os.rmdir(Metadata_Path)
 
-	sys.exit(0)
+	logging.debug("RID_Check_Sequester:: Output = " + Output)
 
+	return Output
 
 
 def findRawSize(SD_Device):
@@ -1158,10 +1182,13 @@ def Smart_Attributes(Dev):
 	f.close()
 
 	# How to determine if a drive is SATA or SAS.  At some point we need to improve this...
-	SAS_Models = [ "ST8000NM0075", "ST4000NM0023", "WD4000F9YZ", "ST8000NM0065" ]
-	SAS=0
-	if Model in SAS_Models:
-		SAS = 1
+	SAS = 0
+	SAS_Transport = SysExec("smartctl -i " + Dev)
+	for line in SAS_Transport.splitlines():
+		if re.search("^Transport protocol", line):
+			if re.search("SAS", line):
+				SAS = 1
+				break
 
 	Drive_Attributes = {}
 
@@ -1374,6 +1401,8 @@ def Determine_Drive_Protocol(Dev):
 
 def RID_Run_SmartTest(Rid, TestType = "short"):
 
+	logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
+
 	if TestType != "short" and TestType != "long":
 		print("ERROR:  You requested a " + TestType + " SMART test which isn't supported.")
 		sys.exit(1)
@@ -1389,7 +1418,7 @@ def RID_Run_SmartTest(Rid, TestType = "short"):
 
 	Dev = Rid_to_Dev[Rid]
 
-	print("DEBUG:  Dev = " + Dev)
+	logging.debug("Dev = " + Dev)
 
 	# I want to check and see if there's already a SMART test running before
 	# spawning another.   Unfortunately, this test only works on SATA drives.
@@ -1403,7 +1432,7 @@ def RID_Run_SmartTest(Rid, TestType = "short"):
 				Test_in_Progress = True
 				break
 
-		print("DEBUG:  Test_in_Progress = " + str(Test_in_Progress))
+		logging.debug("Test_in_Progress = " + str(Test_in_Progress))
 
 	# Start a SMART test...
 	SysExec("smartctl -t " + TestType + " " + Dev)

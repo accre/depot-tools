@@ -26,7 +26,6 @@ Output = []
 # Enable/disable debugging messages
 Print_Debug = False
 
-
 def Debug(text):
 
 	"""
@@ -133,6 +132,9 @@ def Get_ChassisBackplane():
 			Vendor = SysExec("cat /sys/class/enclosure/" + bus + "/device/vendor").strip()
 			Model  = SysExec("cat /sys/class/enclosure/" + bus + "/device/model").strip()
 
+			if Vendor == "LSI" and Model == "VirtualSES":
+				continue
+
 			Debug("Get_ChassisBackplane():: Detected backplane " + Vendor + " " + Model)
 
 			Backplanes.append(Vendor + " " + Model)
@@ -170,6 +172,10 @@ def Get_SASController():
 		# Invader is our 3rd gen SAS controller (cms-depot45-60)
 		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
 			SAS_Controller = "LSI_Invader"
+			break
+
+		if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
+			SAS_Controller = "LSI_FusionMPT"
 			break
 
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
@@ -291,7 +297,11 @@ def map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes):
 
 	Map = {}
 
+	Debug("map_Backplane_Slot_to_SAS_with_sgses::  AllBackplanes = " + str(AllBackplanes))
+
 	for This_Backplane in AllBackplanes:
+
+		Debug("map_Backplane_Slot_to_SAS_with_sgses::  This_Backplane = " + This_Backplane)
 
 		Map[This_Backplane] = {}
 
@@ -443,7 +453,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 	Remap_SAS_to_Dev = {}
 
-	if SAS_Controller == "LSI_Falcon":
+	if SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
 
 		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
 
@@ -471,8 +481,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 			Remap_SAS_to_Dev[This_SAS] = This_Dev
 
 
-	if SAS_Controller == "LSI_Invader":
-
+	if SAS_Controller == "LSI_Invader" or SAS_Controller == "LSI_FusionMPT":
 
 		# On cms-depot18 it appears to need intermediate info too... :-|
 		if socket.gethostname() == "cms-depot18.vampire":

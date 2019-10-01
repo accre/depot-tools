@@ -1,0 +1,269 @@
+#!/usr/bin/env python
+
+import re
+import os
+import sys
+import math
+import time
+import string
+
+from subprocess import Popen, PIPE, STDOUT
+
+# Cache info
+CacheDataArray = {}
+CacheTimeArray = {}
+
+# Enable/disable debugging messages
+Print_Debug = True
+
+def Debug(text):
+
+	"""
+	A wrapper to print debugging info on a single line.
+	"""
+
+	if Print_Debug:
+		print("DEBUG: " + text)
+	return
+
+
+def SysExec(cmd):
+
+	"""
+	Run the given command and return the output.  Cache the output
+	for faster response time if it is fresh enough.
+	"""
+
+	# Cache the output of the command for 20 seconds
+	Cache_Expires = 20
+
+	# Computed once, used twice
+	Cache_Keys = list(CacheDataArray.keys())
+	if cmd in Cache_Keys:
+		Cache_Age = time.time() - CacheTimeArray[cmd]
+	else:
+		Cache_Age = 0
+
+	# If we have valid data cached, return it
+	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+		return CacheDataArray[cmd]
+
+	# If the cmd is "cat", use fopen/fread/fclose to open it and
+	# cache it as we go
+	if cmd.split()[0] == "cat":
+		f = open(cmd.split()[1], "r")
+		CacheDataArray[cmd] = f.read()
+		CacheTimeArray[cmd] = time.time()
+		f.close()
+		return CacheDataArray[cmd]
+
+	# If we don't have cached data, or it's too old, regenerate it
+	if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+		CacheTimeArray[cmd] = time.time()
+		return CacheDataArray[cmd]
+
+	return "ERROR"
+
+
+def Get_SASController():
+
+	"""
+	Return the SAS controller model in this depot.
+	"""
+
+	Debug("def Get_SASController() entry")
+
+	output_lspci = SysExec("lspci")
+
+	# Determine the card type, and thus the path we need to take...
+	SAS_Controller = "Unknown"
+
+	for line in output_lspci.splitlines():
+
+		# Falcon is our 1st gen SAS controller (cms-depot1-17,19-38)
+		if re.search(r"Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS2008 PCI-Express Fusion-MPT SAS-2 \[Falcon\] \(rev 03\)", line):
+			SAS_Controller = "LSI_Falcon"
+			break
+
+		# Thunderbolt is our 2nd gen SAS controller (cms-depot39-44)
+		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS 2208 \[Thunderbolt\] \(rev 05\)", line):
+			SAS_Controller = "LSI_Thunderbolt"
+			break
+
+		# Invader is our 3rd gen SAS controller (cms-depot45-60)
+		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
+			SAS_Controller = "LSI_Invader"
+			break
+
+                if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
+                        SAS_Controller = "LSI_FusionMPT"
+                        break
+
+	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
+
+	if SAS_Controller == "Unknown":
+		Debug("Get_SASController()::  This is an unknown controller type which may not work properly without new code.")
+
+	Debug("def Get_SASController() exit")
+
+	return SAS_Controller
+
+
+###########################################################
+# Main program
+###########################################################
+
+if len(sys.argv) != 4:
+	print("\n" + sys.argv[0] + " - Turn on/off a LED on a slot")
+	print("\nUsage: " + sys.argv[0] + " [front|back] [slot#] [on|off]\n")
+	sys.exit()
+
+SAS_Controller = Get_SASController()
+
+if SAS_Controller == "Unknown":
+	print("ERROR:  Didn't recognize SAS/RAID card.  Quitting...")
+	sys.exit()
+
+if SAS_Controller == "LSI_Invader":
+
+	# We have the backplane/slot, so use lsslot to get the dev entry
+	for line in SysExec("lsslot").splitlines():
+		if re.search(sys.argv[1], line, re.IGNORECASE):
+			This_Slot = line.split("|")[2].strip()
+			if This_Slot == sys.argv[2]:
+				Dev = line.split("|")[4].strip()
+				break
+
+	if not Dev:
+		sys.exit()
+
+	# Now use lsblock to get the serial number of the drive
+	for line in SysExec("lsblock").splitlines():
+		if re.search(Dev + " ", line, re.IGNORECASE):
+			Serial = line.split()[6]
+		        if all(c in string.hexdigits for c in Serial):
+		                Debug("Serial " + Serial + " appears to be a WWN hex")
+				Serial = "0x" + Serial
+				Non_WWN_Serial = "UNKNOWN_NON_WWN_SERIAL"
+			else:
+
+				# Preserve this for the cms-depot18 case and any similar...
+				Non_WWN_Serial = Serial
+				Debug("Serial " + Serial + " appears to be a serial number.   Attempting to find matching WWN...")
+
+				# Change /dev/sda to sda for matching...
+				short_Dev = Dev.split("/")[-1]
+
+				output = SysExec("ls -alh /dev/disk/by-id")
+				for l in output.splitlines():
+					if not re.search(short_Dev + "$", l):
+						continue
+					Serial = l.split(" ")[-3].split("-")[-1]
+
+	Debug("Serial = " + Serial)
+
+	if not Serial:
+		sys.exit()
+
+	# Now, the actual Serial may be Serial, or Serial +/- 1 or 2...
+	Serial_m1 = hex(int(Serial, 16) - 1)
+	Serial_p1 = hex(int(Serial, 16) + 1)
+	Serial_m2 = hex(int(Serial, 16) - 2)
+	Serial_p2 = hex(int(Serial, 16) + 2)
+
+	Serial_list = [ Serial, Serial_m1, Serial_p1, Serial_m2, Serial_p2 ]
+
+	Debug("Serial_list = " + str(Serial_list))
+
+	# Now use MegaCli64 to find the Enclosure and Slot number.  PITA....
+	Found = 0
+	for line in SysExec("MegaCli64 -PDList -aALL").splitlines():
+
+		if not re.search("Enclosure Device ID:", line) and not re.search("Slot Number:", line) and not re.search("Inquiry Data:", line) and not re.search("SAS Address", line):
+			continue
+
+		if re.search("Enclosure Device ID:", line):
+			Enclosure = line.split(":")[1].strip()
+
+		if re.search("Slot Number:", line):
+			Slot = line.split(":")[1].strip()
+
+		if re.search("Inquiry Data:", line):
+			if re.search(Non_WWN_Serial, line):
+				Debug("Found match to Non_WWN_Serial:" + line)
+				Found = 1
+
+		if re.search("SAS Address", line):
+			Test_Serial = line.split(":")[1].strip()
+			if Test_Serial in Serial_list:
+				Found = 1
+
+		if Found == 1:
+			break
+
+	if Found:
+
+		Debug("Matched with Enclosure " + Enclosure + " and Slot " + Slot)
+
+		# Ok, we should have both an Enclosure and Slot number
+		print("Setting the locate LED for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
+		if re.search("on", sys.argv[3], re.IGNORECASE):
+			Verb = "-start"
+		if re.search("off", sys.argv[3], re.IGNORECASE):
+			Verb = "-stop"
+		SysExec("MegaCli64 -PdLocate " + Verb + "-physdrv[" + Enclosure + ":" + Slot + "] -aAll")
+
+	else:
+		print("ERROR:  Couldn't map /dev to backplane/slot.   Quitting...")
+		sys.exit()
+
+
+if SAS_Controller == "LSI_Thunderbolt" or SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
+
+	# It's a good card.  Add any other card which responds normally to sg_ses commands
+
+	Backplane = {}
+	SG_Dev = ""
+	Slots = ""
+	for line in SysExec("lsbackplane").splitlines():
+
+		if not re.search("/dev/", line):
+			continue
+
+		Alias   = line.split("|")[5].strip()
+
+		if re.search(sys.argv[1], Alias, re.IGNORECASE):
+
+			SG_Dev  = line.split("|")[1].strip()
+			Slots   = int(line.split("|")[2].strip())
+
+			if int(sys.argv[2]) >= Slots:
+				# A Error:  Backplane Front has 24 slots and you specified slot 4
+				print("A Error:  Backplane '" + Alias + "' has " + str(Slots) + " slots and you specified slot " + sys.argv[2] + ".")
+				sys.exit()
+
+			if int(sys.argv[2]) < 0:
+				print("B Error:  Backplane '" + Alias + "' has " + str(Slots) + " slots and you specified slot " + sys.argv[2] + ".")
+				sys.exit()
+
+
+	if not SG_Dev:
+		print("Error:  The backplane '" + sys.argv[1] + "' could not be found.")
+		sys.exit()
+
+	if not re.search(sys.argv[3], "on", re.IGNORECASE) and not re.search(sys.argv[3], "off", re.IGNORECASE):
+		print("Error:  The location light can only be in state 'on' or 'off'.   You specified state '" + sys.argv[3] + "', which is invalid.")
+		sys.exit()
+
+	State = sys.argv[3]
+
+	if re.search("on", State, re.IGNORECASE):
+		Verb = "--set=ident"
+	if re.search("off", State, re.IGNORECASE):
+		Verb = "--clear=ident"
+
+	print("Setting the locate LED for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
+	SysExec("sg_ses -I " + sys.argv[2] + " " + Verb + " " + SG_Dev)
+
+sys.exit()

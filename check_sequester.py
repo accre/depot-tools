@@ -41,4 +41,4 @@ if Rid not in Dict_Rid_To_Dev:
 	sys.exit(1)
 
 # Then...
-RID_Check_Sequester(Rid)
+print(RID_Check_Sequester(Rid))
