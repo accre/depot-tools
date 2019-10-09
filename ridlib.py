@@ -740,6 +740,9 @@ def IBP_Server_Start():
 	# Copy the current version to /tmp
 	exe = which("ibp_server.exe")
 	if not exe:
+		exe = which("ibp_server")
+
+	if not exe:
 		logging.error("Can't locate ibp_server.exe in the PATH!  Aborting!")
 		sys.exit(1)
 	shutil.copyfile(exe, ibp_server_exe)
@@ -1624,7 +1627,14 @@ def RID_Create(Rid, Dev, AssumeYes = False):
 	cmd = "mount " + mtopt + " " + Dev + "2 " + Rname + "/data"
 	subprocess.call(cmd.split())
 
-	cmd = "mkfs.resource " + Rid + " dir " + Rname + "/data " + Rname + "/md"
+	mkfs_resource_exe = which(mkfs.resource)
+	if not mkfs_resource_exe:
+		mkfs_resource_exe = which(mkfs_resource)
+
+	if not mkfs_resource_exe:
+		logging.error("Can't locate mkfs.resource in the PATH!  Aborting!")
+
+	cmd = mkfs_resource_exe + " " + Rid + " dir " + Rname + "/data " + Rname + "/md"
 	Config = SysExec(cmd)
 #	Config = subprocess.call(cmd.split())
 
