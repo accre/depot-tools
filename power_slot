@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import re
 import os
@@ -29,41 +29,45 @@ def Debug(text):
 
 def SysExec(cmd):
 
-	"""
-	Run the given command and return the output.  Cache the output
-	for faster response time if it is fresh enough.
-	"""
+        """
+        Run the given command and return the output
+        """
 
-	# Cache the output of the command for 20 seconds
-	Cache_Expires = 20
+        # Cache the output of the command for 20 seconds
+        Cache_Expires = 20
 
-	# Computed once, used twice
-	Cache_Keys = list(CacheDataArray.keys())
-	if cmd in Cache_Keys:
-		Cache_Age = time.time() - CacheTimeArray[cmd]
-	else:
-		Cache_Age = 0
+        # Computed once, used twice
+        Cache_Keys = list(CacheDataArray.keys())
+        if cmd in Cache_Keys:
+                Cache_Age  = time.time() - CacheTimeArray[cmd]
+        else:
+                Cache_Age  = 0
 
-	# If we have valid data cached, return it
-	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-		return CacheDataArray[cmd]
+        Return_Val = "ERROR"
 
-	# If the cmd is "cat", use fopen/fread/fclose to open it and
-	# cache it as we go
-	if cmd.split()[0] == "cat":
-		f = open(cmd.split()[1], "r")
-		CacheDataArray[cmd] = f.read()
-		CacheTimeArray[cmd] = time.time()
-		f.close()
-		return CacheDataArray[cmd]
+        # If we have valid data cached, return it
+        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+                Return_Val = CacheDataArray[cmd]
 
-	# If we don't have cached data, or it's too old, regenerate it
-	if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-		CacheTimeArray[cmd] = time.time()
-		return CacheDataArray[cmd]
+        # If the cmd is "cat", use fopen/fread/fclose to open it and
+        # cache it as we go
+        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
+                f = open(cmd.split()[1], "r")
+                CacheDataArray[cmd] = f.read()
+                CacheTimeArray[cmd] = time.time()
+                f.close()
+                Return_Val = CacheDataArray[cmd]
 
-	return "ERROR"
+        # If we don't have cached data, or it's too old, regenerate it
+        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+                CacheTimeArray[cmd] = time.time()
+                Return_Val = CacheDataArray[cmd]
+
+        if str(type(Return_Val)) == "<class 'bytes'>":
+                Return_Val = Return_Val.decode("utf-8")
+
+        return Return_Val
 
 
 def Get_SASController():
@@ -96,9 +100,10 @@ def Get_SASController():
 			SAS_Controller = "LSI_Invader"
 			break
 
-                if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
-                        SAS_Controller = "LSI_FusionMPT"
-                        break
+		# HBA for cms-depot81-86
+		if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
+			SAS_Controller = "LSI_FusionMPT"
+			break
 
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
 
@@ -142,8 +147,8 @@ if SAS_Controller == "LSI_Invader":
 	for line in SysExec("lsblock").splitlines():
 		if re.search(Dev + " ", line, re.IGNORECASE):
 			Serial = line.split()[6]
-		        if all(c in string.hexdigits for c in Serial):
-		                Debug("Serial " + Serial + " appears to be a WWN hex")
+			if all(c in string.hexdigits for c in Serial):
+				Debug("Serial " + Serial + " appears to be a WWN hex")
 				Serial = "0x" + Serial
 				Non_WWN_Serial = "UNKNOWN_NON_WWN_SERIAL"
 			else:

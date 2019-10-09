@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Returns the PID of the running ibp_server process.  Requires python-psutil to be installed.

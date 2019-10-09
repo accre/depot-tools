@@ -39,41 +39,45 @@ def Debug(text):
 
 def SysExec(cmd):
 
-	"""
-	Run the given command and return the output.  Cache the output
-	for faster response time if it is fresh enough.
-	"""
+        """
+        Run the given command and return the output
+        """
 
-	# Cache the output of the command for 20 seconds
-	Cache_Expires = 20
+        # Cache the output of the command for 20 seconds
+        Cache_Expires = 20
 
-	# Computed once, used twice
-	Cache_Keys = list(CacheDataArray.keys())
-	if cmd in Cache_Keys:
-		Cache_Age = time.time() - CacheTimeArray[cmd]
-	else:
-		Cache_Age = 0
+        # Computed once, used twice
+        Cache_Keys = list(CacheDataArray.keys())
+        if cmd in Cache_Keys:
+                Cache_Age  = time.time() - CacheTimeArray[cmd]
+        else:
+                Cache_Age  = 0
 
-	# If we have valid data cached, return it
-	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-		return CacheDataArray[cmd]
+        Return_Val = "ERROR"
 
-	# If the cmd is "cat", use fopen/fread/fclose to open it and
-	# cache it as we go
-	if cmd.split()[0] == "cat":
-		f = open(cmd.split()[1], "r")
-		CacheDataArray[cmd] = f.read()
-		CacheTimeArray[cmd] = time.time()
-		f.close()
-		return CacheDataArray[cmd]
+        # If we have valid data cached, return it
+        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+                Return_Val = CacheDataArray[cmd]
 
-	# If we don't have cached data, or it's too old, regenerate it
-	if cmd not in Cache_Keys or Cache_Age > Cache_Expires:
-		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-		CacheTimeArray[cmd] = time.time()
-		return CacheDataArray[cmd]
+        # If the cmd is "cat", use fopen/fread/fclose to open it and
+        # cache it as we go
+        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
+                f = open(cmd.split()[1], "r")
+                CacheDataArray[cmd] = f.read()
+                CacheTimeArray[cmd] = time.time()
+                f.close()
+                Return_Val = CacheDataArray[cmd]
 
-	return "ERROR"
+        # If we don't have cached data, or it's too old, regenerate it
+        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+                CacheTimeArray[cmd] = time.time()
+                Return_Val = CacheDataArray[cmd]
+
+        if str(type(Return_Val)) == "<class 'bytes'>":
+                Return_Val = Return_Val.decode("utf-8")
+
+        return Return_Val
 
 
 def FindBackplanes():
@@ -457,7 +461,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
 
-		for This_SAS, This_WWN in Remap_SAS_to_WWN.iteritems():
+		for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
 
 			if This_WWN in SAS_to_Dev:
 				This_Dev = SAS_to_Dev[This_WWN]
@@ -471,7 +475,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_MegaCli()
 
-		for This_SAS, This_WWN in Remap_SAS_to_WWN.iteritems():
+		for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
 
 			if This_WWN in SAS_to_Dev:
 				This_Dev = SAS_to_Dev[This_WWN]
@@ -488,7 +492,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 			Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_MegaCli()
 
-			for This_SAS, This_WWN in Remap_SAS_to_WWN.iteritems():
+			for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
 
 				if This_WWN in SAS_to_Dev:
 					This_Dev = SAS_to_Dev[This_WWN]
@@ -499,7 +503,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 		else:
 
-			for This_SAS, This_Dev in SAS_to_Dev.iteritems():
+			for This_SAS, This_Dev in SAS_to_Dev.items():
 				New_SAS = hex(int(This_SAS, 16) - 2).split("x")[1].lower()
 
 				Remap_SAS_to_Dev[New_SAS] = This_Dev

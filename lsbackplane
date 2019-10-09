@@ -13,7 +13,7 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
-# Our current depots have 24 slots on the Front backplane and 12 on the Rear.  
+# Our current depots have 24 slots on the Front backplane and 12 on the Rear
 # In a more complex setup, we might need a more cumbersome way to alias backplanes
 Alias_by_NumSlots = {}
 Alias_by_NumSlots["24"] = "Front"
@@ -26,10 +26,24 @@ CacheTimeArray = {}
 # Array to hold the output for pretty printing
 Output = []
 
+# Enable/disable debugging messages
+Print_Debug = False
+
+def Debug(text):
+
+        """
+        A wrapper to print debugging info on a single line.
+        """
+
+        if Print_Debug:
+                print("DEBUG: " + text)
+        return
+
+
 def SysExec(cmd):
 
         """
-        Run the given command and return the output.  Cache the output for faster response time if it is fresh enough.
+        Run the given command and return the output
         """
 
         # Cache the output of the command for 20 seconds
@@ -42,32 +56,45 @@ def SysExec(cmd):
         else:
                 Cache_Age  = 0
 
+        Return_Val = "ERROR"
+
         # If we have valid data cached, return it
         if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                return CacheDataArray[cmd]
+                Return_Val = CacheDataArray[cmd]
 
         # If the cmd is "cat", use fopen/fread/fclose to open it and
         # cache it as we go
-        if cmd.split()[0] == "cat":
+        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
                 f = open(cmd.split()[1], "r")
                 CacheDataArray[cmd] = f.read()
                 CacheTimeArray[cmd] = time.time()
                 f.close()
-                return CacheDataArray[cmd]
+                Return_Val = CacheDataArray[cmd]
 
         # If we don't have cached data, or it's too old, regenerate it
-        if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
                 CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
                 CacheTimeArray[cmd] = time.time()
-                return CacheDataArray[cmd]
+                Return_Val = CacheDataArray[cmd]
 
-        return "ERROR"
+        if str(type(Return_Val)) == "<class 'bytes'>":
+                Return_Val = Return_Val.decode("utf-8")
+
+        return Return_Val
+
 
 Enclosure_Raw = SysExec("lsscsi -g")
 for line in Enclosure_Raw.splitlines():
 
 	if not re.search("enclosu", line):
 		continue
+
+	# This is a one-off for the HBA's in our newer depots.  Still unsure why it appears or
+	# if this is the right approach.
+	if re.search("VirtualSES", line):
+		continue
+
+	Debug("line = " + line)
 
 	SG_Dev = line.split()[-1]
 

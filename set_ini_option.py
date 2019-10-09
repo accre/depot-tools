@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import re
 import sys
-import ConfigParser
+import configparser
 
 from ridlib import *
 

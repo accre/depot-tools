@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 	"umount_all_rids.py" will mount all umounted rids

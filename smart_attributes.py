@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Return a list of SMART attributes for a drive.   It tries to be smart and
@@ -54,7 +54,7 @@ for key in Drive_Attributes:
 
 	FORMAT = "%-" + str(len_key+pad_len) + "s %-" + str(len_value+pad_len) + "s %-" + str(len_worst+pad_len) + "s %-" + str(len_thresh+pad_len) + "s %-" + str(len_raw+pad_len) + "s"
 
-print FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw")
+print(FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw"))
 print("=========================================================================")
 
 for key, val in Drive_Attributes.iteritems():
@@ -67,5 +67,5 @@ for key, val in Drive_Attributes.iteritems():
 	Thresh = val.split(" ")[3]
 	Raw    = val.split(" ")[4]
 
-	print FORMAT % (Attr, Value, Worst, Thresh, Raw)
+	print(FORMAT % (Attr, Value, Worst, Thresh, Raw))
 

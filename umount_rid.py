@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 	"umount_resource.py <rid>" will umount rid <rid>

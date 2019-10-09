@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 	A library of common functions for operating on a rid.
@@ -19,7 +19,7 @@ import resource
 import tempfile
 import subprocess
 import collections
-import ConfigParser
+import configparser
 import multiprocessing
 
 from subprocess import Popen, PIPE, STDOUT, call, check_output
@@ -32,48 +32,48 @@ CacheTimeArray = {}
 
 def SysExec(cmd, Debug = False):
 
-        """
-        Run the given command and return the output.  This command will cache the output
-        of commands it has run recently.
-        """
+	"""
+	Run the given command and return the output.  This command will cache the output
+	of commands it has run recently.
+	"""
 
 	if Debug == True:
 		logging.info("SysExec:: cmd: " + cmd)
 
 	# Cache the output of the command for 5 seconds
-        Cache_Expires = 5
+	Cache_Expires = 5
 
-        # Determine the age of the cache
-        Cache_Keys = list(CacheDataArray.keys())
-        if cmd in Cache_Keys:
-                Cache_Age  = time.time() - CacheTimeArray[cmd]
-        else:
-                Cache_Age  = 0
+	# Determine the age of the cache
+	Cache_Keys = list(CacheDataArray.keys())
+	if cmd in Cache_Keys:
+		Cache_Age  = time.time() - CacheTimeArray[cmd]
+	else:
+		Cache_Age  = 0
 
-        # If we have valid data cached, return it
-        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                return CacheDataArray[cmd]
+	# If we have valid data cached, return it
+	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+		return CacheDataArray[cmd]
 
-        # If the cmd is "cat", use fopen/fread/fclose instead since they're much faster than a Popen call
-        if cmd.split()[0] == "cat":
+	# If the cmd is "cat", use fopen/fread/fclose instead since they're much faster than a Popen call
+	if cmd.split()[0] == "cat":
 
 		if not os.path.isfile(cmd.split()[1]):
 			logging.error("SysExec::  ERROR Cannot find file " + cmd.split()[1])
 			return ""
 
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
-                CacheTimeArray[cmd] = time.time()
-                f.close()
-                return CacheDataArray[cmd]
+		f = open(cmd.split()[1], "r")
+		CacheDataArray[cmd] = f.read()
+		CacheTimeArray[cmd] = time.time()
+		f.close()
+		return CacheDataArray[cmd]
 
-        # If we don't have cached data, or it's too old, regenerate it
-        if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-                CacheTimeArray[cmd] = time.time()
-                return CacheDataArray[cmd]
+	# If we don't have cached data, or it's too old, regenerate it
+	if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+		CacheTimeArray[cmd] = time.time()
+		return CacheDataArray[cmd]
 
-        return "ERROR"
+	return "ERROR"
 
 
 def SysExecUncached(cmd):
@@ -312,7 +312,7 @@ def which(program):
 		return os.path.exists(fpath) and os.access(fpath, os.X_OK)
 
 	def ext_candidates(fpath):
- 		yield fpath
+		yield fpath
 		for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
 			yield fpath + ext
 
@@ -852,8 +852,8 @@ def RID_List(arguments=""):
 	rid_list.sort()
 
 	if ("-rid-only" not in sys.argv) and (arguments != "-rid-only"):
-		print FORMAT % ("RID", "Type", "Data", "Metadata", "Import Metadata", "Sequester Status")
-		print FORMAT % ("-----", "----", "-----------", "-----------", "----------------------", "-----------------")
+		print(FORMAT % ("RID", "Type", "Data", "Metadata", "Import Metadata", "Sequester Status"))
+		print(FORMAT % ("-----", "----", "-----------", "-----------", "----------------------", "-----------------"))
 
 	info = []
 
@@ -891,7 +891,7 @@ def RID_List(arguments=""):
 		elif arguments == "-rid-only":
 			print(rid)
 		else:
-			print FORMAT % (rid.rjust(2), mount_type.rjust(2), data_dev.rjust(2), metadata_dev.rjust(2), import_status.rjust(2), sequester_status)
+			print(FORMAT % (rid.rjust(2), mount_type.rjust(2), data_dev.rjust(2), metadata_dev.rjust(2), import_status.rjust(2), sequester_status))
 
 
 
@@ -1281,7 +1281,7 @@ def Smart_Attributes(Dev):
 
 	FORMAT = "%-" + str(len_key+pad_len) + "s %-" + str(len_value+pad_len) + "s %-" + str(len_worst+pad_len) + "s %-" + str(len_thresh+pad_len) + "s %-" + str(len_raw+pad_len) + "s"
 
-	print FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw")
+	print(FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw"))
 	print("=========================================================================")
 
 
@@ -1295,7 +1295,7 @@ def Smart_Attributes(Dev):
 		Thresh = val.split(" ")[3]
 		Raw    = val.split(" ")[4]
 
-		print FORMAT % (Attr, Value, Worst, Thresh, Raw)
+		print(FORMAT % (Attr, Value, Worst, Thresh, Raw))
 
 
 def Query_Drives_Smart_Attributes(Query):
@@ -1371,11 +1371,11 @@ def Print_Query_Drives_Smart_Attributes(Output_Dict):
 
 	Length = len_dev + len_attr + len_value + len_worst + len_thresh + len_raw + 5*pad_len + 6 # The 6 is pulled from thin air, but works...
 
-	print FORMAT % ("Device", "Attr", "Value", "Worst", "Thresh", "Raw")
+	print(FORMAT % ("Device", "Attr", "Value", "Worst", "Thresh", "Raw"))
 	print("=" * Length)
 
 	for key in Output_Dict:
-		print FORMAT % Output_Dict[key]
+		print(FORMAT % Output_Dict[key])
 
 
 def Determine_Drive_Protocol(Dev):
@@ -1736,8 +1736,8 @@ def RID_Export(Rid, MD_Dir = ""):
 	Rid_Info = Rid_Info_String.split(":")
 	logging.debug("RID_Export:: Rid_Info len = " + str(len(Rid_Info)) + " and val = " + str(Rid_Info))
 
-        Depot_Type = Rid_Info[0]
-        logging.debug("RID_Export:: Depot_Type = " + str(Depot_Type))
+	Depot_Type = Rid_Info[0]
+	logging.debug("RID_Export:: Depot_Type = " + str(Depot_Type))
 
 	if len(Rid_Info) != 4:
 		logging.info("ERROR:  It does not appear that Rid " + Rid + " is currently imported.")
@@ -1774,7 +1774,7 @@ def RID_Export(Rid, MD_Dir = ""):
 	# Copy the data over
 	Src = MD_Import_Folder
 	Dst = MD_Export_Folder
-        logging.debug("RID_Export:: Copying metadata from " + Src + " to " + Dst)
+	logging.debug("RID_Export:: Copying metadata from " + Src + " to " + Dst)
 	copyfolder(Src, Dst)
 
 	# Remove the tmp mount if needed
