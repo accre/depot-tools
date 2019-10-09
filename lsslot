@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 lsslot - Mathew Binkley
@@ -602,4 +602,4 @@ x.padding_width = 1
 x.align = "l"
 for row in Output:
 	x.add_row(row)
-print x
+print(x)

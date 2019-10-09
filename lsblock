@@ -1,7 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 lsblock - by <Mathew.Binkley@Vanderbilt.edu>
+          0.1 - Oct 8, 2019
 
 This script detects all the real block devices (ie, hard drives, cd's), and pulls 
 together some useful information into one place (kernel driver, drive model, media type,
@@ -26,7 +27,7 @@ class BlockDevice(object):
 
         SD_Device               = ""    # the /dev/sd* (or whatever) entry for the device
         SG_Device               = ""    # the /dev/sg* entry corresponding to the device
-	RID			= ""	# the L-Store Resource ID
+        RID			= ""	# the L-Store Resource ID
         Sysfs                   = ""    # the /sys/devices entry for the device
         KernelDriver            = ""    # the primary Linux kernel module used by the device
         MediaType               = ""    # Disk, CD-Rom, etc. (Tape and other char devices aren't covered here)
@@ -61,7 +62,7 @@ class BlockDevice(object):
                 self.SG_Device      = FindSG_Device(self.SD_Device, self.Sysfs).strip()
 
 		# Find the L-Store Resource ID
-		self.RID	    = FindRid(self.SD_Device)
+                self.RID	    = FindRid(self.SD_Device)
 
                 # Find the kernel driver that this device uses
                 self.KernelDriver   = FindKernelDriver(self.Sysfs)
@@ -176,7 +177,7 @@ def Bin_Requires(bin):
 
         bin_path = which(bin)
         if not bin_path:
-                print "ERROR: Could not locate " + bin + " in the PATH"
+                print("ERROR: Could not locate " + bin + " in the PATH")
                 sys.exit()
         return bin_path
 
@@ -186,7 +187,7 @@ def Bin_Requires(bin):
 def Bin_Recommends(bin):
         bin_path = which(bin)
         if not bin_path:
-                print "INFO:  This program would run better with " + bin + " in the PATH"
+                print("INFO:  This program would run better with " + bin + " in the PATH")
         return bin_path
 
 
@@ -213,39 +214,44 @@ CacheTimeArray = {}
 def SysExec(cmd):
 
         """
-        Run the given command and return the output.  This command will cache the output
-        of commands it has run recently.
+        Run the given command and return the output
         """
 
-        # Cache the output of the command for 5 seconds
-        Cache_Expires = 5
+        # Cache the output of the command for 20 seconds
+        Cache_Expires = 20
 
-        # Determine the age of the cache
+        # Computed once, used twice
         Cache_Keys = list(CacheDataArray.keys())
         if cmd in Cache_Keys:
                 Cache_Age  = time.time() - CacheTimeArray[cmd]
         else:
                 Cache_Age  = 0
 
+        Return_Val = "ERROR"
+
         # If we have valid data cached, return it
         if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                return CacheDataArray[cmd]
+                Return_Val = CacheDataArray[cmd]
 
-        # If the cmd is "cat", use fopen/fread/fclose instead since they're much faster than a Popen call
-        if cmd.split()[0] == "cat":
+        # If the cmd is "cat", use fopen/fread/fclose to open it and
+        # cache it as we go
+        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
                 f = open(cmd.split()[1], "r")
                 CacheDataArray[cmd] = f.read()
                 CacheTimeArray[cmd] = time.time()
                 f.close()
-                return CacheDataArray[cmd]
+                Return_Val = CacheDataArray[cmd]
 
         # If we don't have cached data, or it's too old, regenerate it
-        if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
                 CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
                 CacheTimeArray[cmd] = time.time()
-                return CacheDataArray[cmd]
+                Return_Val = CacheDataArray[cmd]
 
-        return "ERROR"
+        if str(type(Return_Val)) == "<class 'bytes'>":
+                Return_Val = Return_Val.decode("utf-8")
+
+        return Return_Val
 
 def Query_SysDevice(SD_Device):
 
@@ -381,10 +387,10 @@ def Query_udevadm(SD_Device, Key):
 	if Human_Readable_Mapping[Key]:
 		Key = Human_Readable_Mapping[Key]
 
-        if UDEVADM_BIN.endswith("udevinfo"):
-                udev_cmd = UDEVADM_BIN + " -q env -n " + SD_Device
-        else:
-                udev_cmd = UDEVADM_BIN + " info --query=property --name=" + SD_Device
+	if UDEVADM_BIN.endswith("udevinfo"):
+		udev_cmd = UDEVADM_BIN + " -q env -n " + SD_Device
+	else:
+		udev_cmd = UDEVADM_BIN + " info --query=property --name=" + SD_Device
 
 	for line in SysExec(udev_cmd).splitlines():
 		if line.startswith(Key + "="):
@@ -419,7 +425,7 @@ def Query_lspci(pciid):
 	DeviceMfg  = "INVALID_PCI_ID"
 	DeviceName = "INVALID_PCI_ID"
 
- 	for line in SysExec(LSPCI_BIN + " -mm").splitlines():
+	for line in SysExec(LSPCI_BIN + " -mm").splitlines():
 		if line.startswith(pciid_grep):
 		
 			DeviceType = line.split("\"")[1]
@@ -526,7 +532,7 @@ def FindSG_Device(SD_Device, Sysfs):
         if os.path.isdir(sg_path):
 # Profiling shows this as a slow point. Changed to os.listdir for speed.
 #                p1 = SysExec("ls -1 " + sg_path)
-		p1 = os.listdir(sg_path)[0]
+                p1 = os.listdir(sg_path)[0]
                 SG_Device = "/dev/" + p1
         else:
                 SG_Device = "NO_SG_DEV"
@@ -601,14 +607,14 @@ def FindMediaType(SD_Device):
 		Media_BestGuess = "disk:hd"
 		hdfile = "/proc/ide/" + SD_Device.split("/")[-1] + "/media"
 		if os.path.isfile(hdfile):
-		       	p1 = SysExec("cat " + hdfile).strip()
+			p1 = SysExec("cat " + hdfile).strip()
 			if p1 == "cdrom":
 				Media_BestGuess = "cd/dvd"
 		return Media_BestGuess
 
 	MediaInt = Query_SysClassScsiDevice(SD_Device, "type")
 
-        if MediaInt == "UNKNOWN" and not SD_Device.startswith("/dev/hd"):
+	if MediaInt == "UNKNOWN" and not SD_Device.startswith("/dev/hd"):
 		return "UNKNOWN"
 
 	Media = SCSI_MEDIA_TYPE[int(MediaInt)].strip()
@@ -619,7 +625,7 @@ def FindMediaType(SD_Device):
 		ReadFile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/rotational"
 
 		if os.path.isfile(ReadFile) or os.path.islink(ReadFile):
-	        	is_rotating = int(SysExec("cat " + ReadFile).strip())
+			is_rotating = int(SysExec("cat " + ReadFile).strip())
 	
 			# This is of necessity a guess...
 			if is_rotating == 1:	# Probably a hard disk			
@@ -628,7 +634,7 @@ def FindMediaType(SD_Device):
 				Media = "disk:ssd"
 
 
-        if Media == "cd/dvd":
+	if Media == "cd/dvd":
 
                 Is_DVD    = Query_udevadm(SD_Device, "Is_DVD")
                 Is_Bluray = Query_udevadm(SD_Device, "Is_Bluray")
@@ -1137,14 +1143,14 @@ for device in ValidBlockDevices:
 ParamLength = {}
 for param in BlockDeviceParameters:
 
-        if param in PrettyHeaderMap:
-	        ParamLength[param] = PrettyHeaderMap[param].__len__()
-        else:
+	if param in PrettyHeaderMap:
+		ParamLength[param] = PrettyHeaderMap[param].__len__()
+	else:
 		ParamLength[param] = param.__len__()
 
 
 for device in ValidBlockDevices:
-        for param in BlockDeviceParameters:
+	for param in BlockDeviceParameters:
 		t = getattr(BlockDeviceInfo[device], param)
 		if isinstance(t, str):
 			ValueLength = t.__len__()
@@ -1168,15 +1174,15 @@ TOTALLENGTH = TOTALLENGTH - 2
 #####################################################
 # Print it and go home...
 #####################################################
-print
-print FORMAT % tuple(PrettyHeaders)
-print "=" * TOTALLENGTH
+print("")
+print(FORMAT % tuple(PrettyHeaders))
+print("=" * TOTALLENGTH)
 
 for device in ValidBlockDevices:
         printline = []
         for param in BlockDeviceParameters:
                 printline.append(getattr(BlockDeviceInfo[device], param))
 
-        print FORMAT % tuple(printline)
+        print(FORMAT % tuple(printline))
 
-print
+print("")
