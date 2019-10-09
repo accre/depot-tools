@@ -57,7 +57,7 @@ for key in Drive_Attributes:
 print(FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw"))
 print("=========================================================================")
 
-for key, val in Drive_Attributes.iteritems():
+for key, val in Drive_Attributes.items():
 
 	val = Drive_Attributes[key]
 

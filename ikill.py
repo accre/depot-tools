@@ -15,4 +15,6 @@ from time import gmtime, strftime, sleep
 
 from ridlib import *
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
+
 IBP_Server_Stop()

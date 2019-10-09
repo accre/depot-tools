@@ -30,50 +30,47 @@ depot_dir = "/depot"  # This was originally shared via the depot_common file.
 CacheDataArray = {}
 CacheTimeArray = {}
 
-def SysExec(cmd, Debug = False):
+def SysExec(cmd):
 
-	"""
-	Run the given command and return the output.  This command will cache the output
-	of commands it has run recently.
-	"""
+        """
+        Run the given command and return the output
+        """
 
-	if Debug == True:
-		logging.info("SysExec:: cmd: " + cmd)
+        # Cache the output of the command for 20 seconds
+        Cache_Expires = 20
 
-	# Cache the output of the command for 5 seconds
-	Cache_Expires = 5
+        # Computed once, used twice
+        Cache_Keys = list(CacheDataArray.keys())
+        if cmd in Cache_Keys:
+                Cache_Age  = time.time() - CacheTimeArray[cmd]
+        else:
+                Cache_Age  = 0
 
-	# Determine the age of the cache
-	Cache_Keys = list(CacheDataArray.keys())
-	if cmd in Cache_Keys:
-		Cache_Age  = time.time() - CacheTimeArray[cmd]
-	else:
-		Cache_Age  = 0
+        Return_Val = "ERROR"
 
-	# If we have valid data cached, return it
-	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-		return CacheDataArray[cmd]
+        # If we have valid data cached, return it
+        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+                Return_Val = CacheDataArray[cmd]
 
-	# If the cmd is "cat", use fopen/fread/fclose instead since they're much faster than a Popen call
-	if cmd.split()[0] == "cat":
+        # If the cmd is "cat", use fopen/fread/fclose to open it and
+        # cache it as we go
+        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
+                f = open(cmd.split()[1], "r")
+                CacheDataArray[cmd] = f.read()
+                CacheTimeArray[cmd] = time.time()
+                f.close()
+                Return_Val = CacheDataArray[cmd]
 
-		if not os.path.isfile(cmd.split()[1]):
-			logging.error("SysExec::  ERROR Cannot find file " + cmd.split()[1])
-			return ""
+        # If we don't have cached data, or it's too old, regenerate it
+        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+                CacheTimeArray[cmd] = time.time()
+                Return_Val = CacheDataArray[cmd]
 
-		f = open(cmd.split()[1], "r")
-		CacheDataArray[cmd] = f.read()
-		CacheTimeArray[cmd] = time.time()
-		f.close()
-		return CacheDataArray[cmd]
+        if str(type(Return_Val)) == "<class 'bytes'>":
+                Return_Val = Return_Val.decode("utf-8")
 
-	# If we don't have cached data, or it's too old, regenerate it
-	if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-		CacheTimeArray[cmd] = time.time()
-		return CacheDataArray[cmd]
-
-	return "ERROR"
+        return Return_Val
 
 
 def SysExecUncached(cmd):
@@ -84,7 +81,12 @@ def SysExecUncached(cmd):
 	faster.
 	"""
 
-	return Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+	output = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+
+	if str(type(output)) == "<class 'bytes'>":
+		output = output.decode("utf-8")
+
+	return output
 
 
 def Generate_Rid_Dict():
@@ -157,6 +159,10 @@ def is_rid_mounted(rid):
 	output = SysExecUncached("mount")
 
 	is_mounted = False
+
+	if str(type(output)) == "<class 'bytes'>":
+		output = output.decode("utf-8")
+
 	for line in output.splitlines():
 		if re.search("/depot/rid-" + rid + "/data", line):
 			is_mounted = True
@@ -263,7 +269,9 @@ def touch(fname, times=None):
 	with open(fname, 'a'):
 		os.utime(fname, times)
 
+
 def check_pid(pid):
+
 	""" Check For the existence of a unix pid. """
 
 	try:
@@ -726,9 +734,9 @@ def IBP_Server_Start():
 
 		while check_pid(pid):
 			time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-			pid_status=subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
+			pid_status = SysExecUncached("ps u -p " + str(pid))
 			logging.info("Waiting for ibp_server shutdown to complete...  " + time)
-			logging.info(pid_status)
+			logging.info(str(pid_status))
 			sleep(1)
 
 		print("Completed shutdown.")
@@ -832,6 +840,7 @@ def IBP_Server_Stop():
 
 	while check_pid(pid):
 		time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+#		pid_status = SysExec("ps u -p"
 		pid_status=subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
 		print("Waiting for ibp_server shutdown to complete...  " + time)
 		print(pid_status)
@@ -1285,7 +1294,7 @@ def Smart_Attributes(Dev):
 	print("=========================================================================")
 
 
-	for key, val in sorted.iteritems():
+	for key, val in sorted.items():
 
 		val = Drive_Attributes[key]
 
@@ -1323,6 +1332,7 @@ def Query_Drives_Smart_Attributes(Query):
 			for Key in Attributes:
 				Val = Attributes[Key]
 				Name = Val.split()[0]
+
 				if re.search(Query, Name):
 					Attr = Val
 

@@ -65,7 +65,7 @@ for line in SysExec("lsblock").splitlines():
 # Also, add any existing block device which has a Rid outside the
 # valid range for this depots (usually happens when we recycle a drive
 # without wiping it first)
-for Rid, Dev in Rid_to_Dev_Dict.iteritems():
+for Rid, Dev in Rid_to_Dev_Dict.items():
 	if Rid not in ValidRids:
 		logging.debug("Adding outsider rid " + Dev + " to Available_BD")
 		Available_BD.append(Dev)
