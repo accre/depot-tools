@@ -1195,7 +1195,7 @@ def Smart_Attributes(Dev):
 
 	# How to determine if a drive is SATA or SAS.  At some point we need to improve this...
 	SAS = 0
-	SAS_Transport = SysExec("smartctl -i " + Dev)
+	SAS_Transport = SysExec("sudo smartctl -i " + Dev)
 	for line in SAS_Transport.splitlines():
 		if re.search("^Transport protocol", line):
 			if re.search("SAS", line):
@@ -1206,7 +1206,7 @@ def Smart_Attributes(Dev):
 
 	if SAS == 1:
 
-		Attr = SysExec("smartctl -a " + Dev)
+		Attr = SysExec("sudo smartctl -a " + Dev)
 
 		for line in Attr.splitlines():
 
@@ -1247,7 +1247,7 @@ def Smart_Attributes(Dev):
 
 	else:
 
-		Attr = SysExec("smartctl --attributes " + Dev)
+		Attr = SysExec("sudo smartctl --attributes " + Dev)
 
 		for line in Attr.splitlines():
 
@@ -1397,7 +1397,7 @@ def Determine_Drive_Protocol(Dev):
 
 	Protocol = "UNKNOWN"
 
-	for line in SysExec("smartctl -i " + Dev).splitlines():
+	for line in SysExec("sudo smartctl -i " + Dev).splitlines():
 
 		if re.search("Transport protocol", line) and re.search("SAS", line):
 			Protocol = "SAS"
@@ -1440,7 +1440,7 @@ def RID_Run_SmartTest(Rid, TestType = "short"):
 	if Drive_Protocol == "SATA":
 
 		Test_in_Progress = False
-		for line in SysExec("smartctl -c " + Dev).splitlines():
+		for line in SysExec("sudo smartctl -c " + Dev).splitlines():
 			if re.search("Self-test routine in progress", line):
 				Test_in_Progress = True
 				break
@@ -1448,7 +1448,7 @@ def RID_Run_SmartTest(Rid, TestType = "short"):
 		logging.debug("Test_in_Progress = " + str(Test_in_Progress))
 
 	# Start a SMART test...
-	SysExec("smartctl -t " + TestType + " " + Dev)
+	SysExec("sudo smartctl -t " + TestType + " " + Dev)
 
 
 def HumanFriendlyBytes(bytes, scale, decimals):

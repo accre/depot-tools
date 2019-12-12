@@ -52,7 +52,7 @@ for key in Drive_Attributes:
 	len_thresh = max(len(val.split(" ")[3]), len_thresh)
 	len_raw    = max(len(val.split(" ")[4]), len_raw)
 
-	FORMAT = "%-" + str(len_key+pad_len) + "s %-" + str(len_value+pad_len) + "s %-" + str(len_worst+pad_len) + "s %-" + str(len_thresh+pad_len) + "s %-" + str(len_raw+pad_len) + "s"
+FORMAT = "%-" + str(len_key+pad_len) + "s %-" + str(len_value+pad_len) + "s %-" + str(len_worst+pad_len) + "s %-" + str(len_thresh+pad_len) + "s %-" + str(len_raw+pad_len) + "s"
 
 print(FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw"))
 print("=========================================================================")
