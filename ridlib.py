@@ -1029,7 +1029,8 @@ def Set_Ini_Option(File, Section, Key, Value):
 	if os.path.isfile(File):
 		os.rename(File, File + ".old")
 
-	Config = ConfigParser.ConfigParser()
+#	Config = ConfigParser.ConfigParser()
+	Config = configparser.ConfigParser()
 
 	# I thought this would copy comments to the new config file, but apparently not.
 	# Config.comment_prefixes=('#', ';')
@@ -1637,9 +1638,9 @@ def RID_Create(Rid, Dev, AssumeYes = False):
 	cmd = "mount " + mtopt + " " + Dev + "2 " + Rname + "/data"
 	subprocess.call(cmd.split())
 
-	mkfs_resource_exe = which(mkfs.resource)
+	mkfs_resource_exe = which("mkfs.resource")
 	if not mkfs_resource_exe:
-		mkfs_resource_exe = which(mkfs_resource)
+		mkfs_resource_exe = which("mkfs_resource")
 
 	if not mkfs_resource_exe:
 		logging.error("Can't locate mkfs.resource in the PATH!  Aborting!")
