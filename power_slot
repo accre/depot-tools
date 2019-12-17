@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 import re
 import os
@@ -100,11 +100,6 @@ def Get_SASController():
 			SAS_Controller = "LSI_Invader"
 			break
 
-		# HBA for cms-depot81-86
-		if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
-			SAS_Controller = "LSI_FusionMPT"
-			break
-
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
 
 	if SAS_Controller == "Unknown":
@@ -147,8 +142,8 @@ if SAS_Controller == "LSI_Invader":
 	for line in SysExec("lsblock").splitlines():
 		if re.search(Dev + " ", line, re.IGNORECASE):
 			Serial = line.split()[6]
-			if all(c in string.hexdigits for c in Serial):
-				Debug("Serial " + Serial + " appears to be a WWN hex")
+		        if all(c in string.hexdigits for c in Serial):
+		                Debug("Serial " + Serial + " appears to be a WWN hex")
 				Serial = "0x" + Serial
 				Non_WWN_Serial = "UNKNOWN_NON_WWN_SERIAL"
 			else:
@@ -224,7 +219,7 @@ if SAS_Controller == "LSI_Invader":
 		sys.exit()
 
 
-if SAS_Controller == "LSI_Thunderbolt" or SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
+if SAS_Controller == "LSI_Thunderbolt" or SAS_Controller == "LSI_Falcon":
 
 	# It's a good card.  Add any other card which responds normally to sg_ses commands
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
+# See if we're using the python or bash based depot mgmt scripts and react accordingly.
+[ -e "/usr/local/bin/smart_attributes"    ] && smart_attributes_exec="smart_attributes"
+[ -e "/usr/local/bin/smart_attributes.py" ] && smart_attributes_exec="smart_attributes.py"
+
 attr=`mktemp`
+smartctl=`mktemp`
 
 # Save /dev/ to rid map
 lsslot=`mktemp`
@@ -35,6 +40,7 @@ do
 	fi
 
 	HD_Size=`cat ${lsblock} | grep " ${dev} " | awk '{ print $11 }'`
+	HD_Vendor=`cat ${lsblock} | grep " ${dev} " | awk '{ print $5 }'`
 	HD_Model=`cat ${lsblock} | grep " ${dev} " | awk '{ print $6 }'`
 
 	HD_Capacity="UNKNOWN"
@@ -59,38 +65,28 @@ do
 			HD_Capacity="8 TB" ;;
 	esac
 
-	# How to determine if a drive is SATA or SAS.  At some point we need to improve this...
+ 	# Assume drives are SATA by default, since most are...
 	SAS=0
-	if [[ "${HD_Model}" =~ "ST8000NM0075" ]]; then
-		SAS=1
-	fi
-	if [[ "${HD_Model}" =~ "ST8000NM0065" ]]; then
-		SAS=1
-	fi
-	if [[ "${HD_Model}" =~ "ST4000NM0023" ]]; then
-		SAS=1
-	fi
-	if [[ "${HD_Model}" =~ "WD4000F9YZ" ]]; then
-		SAS=1
-	fi
+	SAS_QUERY=`sudo smartctl -i ${dev} | grep -i "Transport protocol:" | grep SAS | wc -l`
+	[ "${SAS_QUERY}" -eq "1" ] && SAS=1
 
-	if [ "${SAS}" -eq "0" ]; then
+	if [ "${SAS}" == 0 ]; then
 
 		# These are SMART attributes that we don't want to alert if they are marginal/failing
 		IGNORE_THESE_ATTRIBUTES="High_Fly_Writes|Load_Cycle_Count"
 
 		# Fetch info on the remaining SMART attributes...
-		smartctl --attributes ${dev} | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | egrep -v "(${IGNORE_THESE_ATTRIBUTES})" > ${attr}
+		sudo smartctl --attributes ${dev} | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | egrep -v "(${IGNORE_THESE_ATTRIBUTES})" > ${attr}
 
 		# Fetch the SMART self-test execution status
-		status=`smartctl -a ${dev} | grep -A 5 "Self-test execution status" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/"`
+		status=`sudo smartctl -a ${dev} | grep -A 5 "Self-test execution status" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/"`
 
 		if [[ "${status}" =~ "The previous self-test completed having the read element of the test failed" ]]; then
-			printf "Dev %-9s Rid ${rid} is failing a read-element test ${RMA_Status}\n" ${dev}
+			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a read-element test ${RMA_Status}\n" ${dev}
 		fi
 
 		if [[ "${status}" =~ "The previous self-test completed having a test element that failed and the test element that failed is not known" ]]; then
-			printf "Dev %-9s Rid ${rid} is failing a test-element test ${RMA_Status}\n" ${dev}
+			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a test-element test ${RMA_Status}\n" ${dev}
 		fi
 
 		# Iterate over all SMART attributes
@@ -123,7 +119,7 @@ do
 			THRESH_197="500"
 			if [ "${attribute}" -eq "197" ]; then
 				if [ "${REAL_VAL}" -ge "${THRESH_197}" ]; then
-					printf "Dev %-9s Rid ${rid} has a 197_Current_Pending_Sector value over ${THRESH_197} ${RMA_Status}\n" ${dev}
+					printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a 197_Current_Pending_Sector value over ${THRESH_197} ${RMA_Status}\n" ${dev}
 				fi
 			fi
 
@@ -134,26 +130,26 @@ do
 			DELTA_CURRENT=`echo "${CURRENT_VAL}-${THRESH_VAL}" | bc -l`
 
 			if [ "${DELTA_CURRENT}" -le "0" ]; then
-				printf "Dev %-9s Rid ${rid} ${disk_type} is failing  on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing  on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
 			elif [ "${DELTA_CURRENT}" -lt "10" -a "${DELTA_CURRENT}" -gt 0 -a "${THRESH_VAL}" -lt "50" ]; then
-				printf "Dev %-9s Rid ${rid} ${disk_type} is marginal on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is marginal on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
 			fi
 		done
 	else
+
 		# Assume drive is SAS
+		Defects=`${smart_attributes_exec} ${dev} | grep 9000_SAS_Grown_Defect_List | awk '{ print $2 }'`
 
-		Defects=`smart_attributes.py ${dev} | grep 9000_SAS_Grown_Defect_List | awk '{ print $2 }'`
-
-		if [ "${Defects}" -gt "0" ]; then
+ 		if [ "${Defects}" -gt "0" ]; then
 
 			if [ "${Defects}" -gt "50" ]; then
-				printf "Dev %-9s Rid ${rid} has a critically-high number of defects (${Defects} defects)\n" ${dev}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a critically-high number of defects (${Defects} defects)\n" ${dev}
 			else
-				printf "Dev %-9s Rid ${rid} has a non-zero number of defects (${Defects} defects)\n" ${dev}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of defects (${Defects} defects)\n" ${dev}
 			fi
 		fi
 
 	fi
 done
 
-rm -f ${attr} ${lsslot} ${lsblock} ${blkid}
+rm -f ${attr} ${lsslot} ${lsblock} ${blkid} ${smartctl}
