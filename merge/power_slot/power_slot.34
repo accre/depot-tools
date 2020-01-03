@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 import re
 import os
@@ -29,45 +29,41 @@ def Debug(text):
 
 def SysExec(cmd):
 
-        """
-        Run the given command and return the output
-        """
+	"""
+	Run the given command and return the output.  Cache the output
+	for faster response time if it is fresh enough.
+	"""
 
-        # Cache the output of the command for 20 seconds
-        Cache_Expires = 20
+	# Cache the output of the command for 20 seconds
+	Cache_Expires = 20
 
-        # Computed once, used twice
-        Cache_Keys = list(CacheDataArray.keys())
-        if cmd in Cache_Keys:
-                Cache_Age  = time.time() - CacheTimeArray[cmd]
-        else:
-                Cache_Age  = 0
+	# Computed once, used twice
+	Cache_Keys = list(CacheDataArray.keys())
+	if cmd in Cache_Keys:
+		Cache_Age = time.time() - CacheTimeArray[cmd]
+	else:
+		Cache_Age = 0
 
-        Return_Val = "ERROR"
+	# If we have valid data cached, return it
+	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+		return CacheDataArray[cmd]
 
-        # If we have valid data cached, return it
-        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                Return_Val = CacheDataArray[cmd]
+	# If the cmd is "cat", use fopen/fread/fclose to open it and
+	# cache it as we go
+	if cmd.split()[0] == "cat":
+		f = open(cmd.split()[1], "r")
+		CacheDataArray[cmd] = f.read()
+		CacheTimeArray[cmd] = time.time()
+		f.close()
+		return CacheDataArray[cmd]
 
-        # If the cmd is "cat", use fopen/fread/fclose to open it and
-        # cache it as we go
-        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
-                CacheTimeArray[cmd] = time.time()
-                f.close()
-                Return_Val = CacheDataArray[cmd]
+	# If we don't have cached data, or it's too old, regenerate it
+	if not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+		CacheTimeArray[cmd] = time.time()
+		return CacheDataArray[cmd]
 
-        # If we don't have cached data, or it's too old, regenerate it
-        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-                CacheTimeArray[cmd] = time.time()
-                Return_Val = CacheDataArray[cmd]
-
-        if str(type(Return_Val)) == "<class 'bytes'>":
-                Return_Val = Return_Val.decode("utf-8")
-
-        return Return_Val
+	return "ERROR"
 
 
 def Get_SASController():
@@ -95,13 +91,12 @@ def Get_SASController():
 			SAS_Controller = "LSI_Thunderbolt"
 			break
 
-		# Invader is our 3rd gen SAS controller (cms-depot45-80)
+		# Invader is our 3rd gen SAS controller (cms-depot45-60)
 		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
 			SAS_Controller = "LSI_Invader"
 			break
 
-		# HBA for cms-depot81-86
-		if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
+                if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
                         SAS_Controller = "LSI_FusionMPT"
                         break
 
@@ -143,12 +138,14 @@ if SAS_Controller == "LSI_Invader":
 	if not Dev:
 		sys.exit()
 
+        # Problem:  If the slot is empty, it's going to return "Empty_Slot" and the below won't work...
+
 	# Now use lsblock to get the serial number of the drive
 	for line in SysExec("lsblock").splitlines():
 		if re.search(Dev + " ", line, re.IGNORECASE):
 			Serial = line.split()[6]
-			if all(c in string.hexdigits for c in Serial):
-				Debug("Serial " + Serial + " appears to be a WWN hex")
+		        if all(c in string.hexdigits for c in Serial):
+		                Debug("Serial " + Serial + " appears to be a WWN hex")
 				Serial = "0x" + Serial
 				Non_WWN_Serial = "UNKNOWN_NON_WWN_SERIAL"
 			else:
@@ -264,11 +261,11 @@ if SAS_Controller == "LSI_Thunderbolt" or SAS_Controller == "LSI_Falcon" or SAS_
 	State = sys.argv[3]
 
 	if re.search("on", State, re.IGNORECASE):
-		Verb = "--set=ident"
+		Verb = "--set=devoff"
 	if re.search("off", State, re.IGNORECASE):
-		Verb = "--clear=ident"
+		Verb = "--clear=devoff"
 
-	print("Setting the locate LED for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
+	print("Setting the power state for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
 	SysExec("sg_ses -I " + sys.argv[2] + " " + Verb + " " + SG_Dev)
 
 sys.exit()

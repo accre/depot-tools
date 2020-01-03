@@ -95,15 +95,15 @@ def Get_SASController():
 			SAS_Controller = "LSI_Thunderbolt"
 			break
 
-		# Invader is our 3rd gen SAS controller (cms-depot45-60)
+		# Invader is our 3rd gen SAS controller (cms-depot45-80)
 		if re.search(r"RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
 			SAS_Controller = "LSI_Invader"
 			break
 
 		# HBA for cms-depot81-86
 		if re.search(r"81:00.0 Serial Attached SCSI controller: LSI Logic / Symbios Logic SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
-			SAS_Controller = "LSI_FusionMPT"
-			break
+                        SAS_Controller = "LSI_FusionMPT"
+                        break
 
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
 
