@@ -26,7 +26,7 @@ def Set_Rid_Option(Rid, Sec, Key, Val):
 	# Alan's original script
 	Config_File = "/depot/rid-" + Rid + "/md/rid.settings"
 
-	Set_Ini_Option(Config_File, Sec, Key, Val)
+	Set_Ini_Option(Config_File, Section, Key, Val)
 
 # If I'm running under pychecker, remove it from sys.argv so it will work normally
 for i in sys.argv:
