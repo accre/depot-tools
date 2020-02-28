@@ -150,10 +150,9 @@ def is_rid_visible_to_os(rid):
 		rid_exists = True
 	return rid_exists
 
-
-def is_rid_mounted(rid):
+def is_path_mounted(path):
 	"""
-	Returns True if the rid has been mounted
+	Returns True if the path has been mounted
 	"""
 
 	output = SysExecUncached("mount")
@@ -164,11 +163,33 @@ def is_rid_mounted(rid):
 		output = output.decode("utf-8")
 
 	for line in output.splitlines():
-		if re.search("/depot/rid-" + rid + "/data", line):
+		if re.search(path, line):
 			is_mounted = True
 			break
 
 	return is_mounted
+
+
+def is_rid_mounted(rid):
+	"""
+	Returns True if the rid has been mounted
+	"""
+
+	return is_path_mounted("/depot/rid-" + rid + "/data")
+
+#	output = SysExecUncached("mount")
+#
+#	is_mounted = False
+#
+#	if str(type(output)) == "<class 'bytes'>":
+#		output = output.decode("utf-8")
+#
+#	for line in output.splitlines():
+#		if re.search("/depot/rid-" + rid + "/data", line):
+#			is_mounted = True
+#			break
+#
+#	return is_mounted
 
 
 def is_rid_attached_to_ibpserver(rid):
@@ -224,6 +245,32 @@ def umount_unix(filesystem):
 	logging.debug("umount_unix:: Unmounting " + filesystem)
 	cmd = "umount " + filesystem
 	subprocess.call(cmd.split())
+
+	### Add a test here:  After umounting, see if the drive is still mounted.  This can
+        ### happen if the drive is still writing lots of data to disk, or if the disk has failed
+	### Wait a couple of seconds (on the assumption that it's writing), and "umount -l" if it doesn't go willingly
+
+	# See if the drive is still mounted.  Wait, then check again.  After 30 seconds, assume the drive is faulty and "umount -l"
+	count = 0
+	while count < 10:
+		if not is_path_mounted(filesystem):
+			continue
+			logging.debug("umount_unix:: " + filesystem + " is still mounted.   Attempting to wait...")
+		sleep(1)
+
+	if is_path_mounted(filesystem):
+		logging.debug("umount_unix:: " + filesystem + " refuses umount.   Attempting umount -l")
+
+		cmd = "umount -l "  + filesystem
+		subprocess.call(cmd.split())
+
+		sleep(5)
+		if is_path_mounted(filesystem):
+			logging.debug("umount_unix::  ERRRO!  " + filesystem + " refuses all umount attempts.   Likely failed drive")
+			# Ok, it's not working, error out
+
+
+########################################################################
 
 # Return the last line of a file
 def LastLine(file):
