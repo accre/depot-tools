@@ -253,10 +253,13 @@ def umount_unix(filesystem):
 	# See if the drive is still mounted.  Wait, then check again.  After 30 seconds, assume the drive is faulty and "umount -l"
 	count = 0
 	while count < 10:
-		if not is_path_mounted(filesystem):
-			continue
+		logging.debug("umount_unix::  DEBUG:  Testing for " + filesystem)
+		if is_path_mounted(filesystem):
 			logging.debug("umount_unix:: " + filesystem + " is still mounted.   Attempting to wait...")
-		sleep(1)
+			count = count + 1
+			sleep(1)
+		else:
+			break
 
 	if is_path_mounted(filesystem):
 		logging.debug("umount_unix:: " + filesystem + " refuses umount.   Attempting umount -l")
