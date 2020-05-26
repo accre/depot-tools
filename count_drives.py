@@ -29,7 +29,7 @@ Count_Pending = 0
 for line in SysExec("get_version -a").splitlines():
 
 	if re.search("^RID: ", line):
-		IBP_Rids.append(line.split(" ")[1])
+		IBP_Rids.append(int(line.split(" ")[1]))
 
 	if re.search("Pending RID list", line):
 
@@ -59,7 +59,7 @@ for disk in LS:
 	if not re.search("rid-data", disk):
 		continue
 
-	OS_Rids.append(disk.split("-")[2])
+	OS_Rids.append(int(disk.split("-")[2]))
 OS_Rids.sort()
 Num_BLK = len(OS_Rids)
 
