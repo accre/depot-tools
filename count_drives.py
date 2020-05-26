@@ -75,7 +75,7 @@ Num_Seq = 0
 if Diff_Rids:
 	for Rid in list(Diff_Rids):
 #		print("DEBUG:  Checking Rid " + str(Rid))
-		Status = RID_Check_Sequester(Rid)
+		Status = RID_Check_Sequester(str(Rid))
 #		print("DEBUG:  Rid " + str(Rid) + " status = " + str(Status))
 		if Status.startswith("SEQUESTERED"):
 			Num_Seq += 1
