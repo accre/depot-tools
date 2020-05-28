@@ -63,8 +63,7 @@ def SysExec(cmd):
                         Return_Val = CacheDataArray[cmd]
                 except IOError:
                         print("ERROR:  File not accessible")
-                finally:
-                        f.close()
+                        sys.exit(2)
 
         # If we don't have cached data, or it's too old, regenerate it
         elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
