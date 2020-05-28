@@ -1,47 +1,43 @@
 #!/usr/bin/env bash
 
-# See if we're using the python or bash based depot mgmt scripts and react accordingly.
-[ -e "/usr/local/bin/smart_attributes"    ] && smart_attributes_exec="smart_attributes"
-[ -e "/usr/local/bin/smart_attributes.py" ] && smart_attributes_exec="smart_attributes.py"
+### Create some temp files so we can cache output
+attr=$(mktemp)
+smart=$(mktemp)
+lsslot=$(mktemp)
+lsblock=$(mktemp)
 
-attr=`mktemp`
-smartctl=`mktemp`
+lsslot  > "${lsslot}"
+lsblock > "${lsblock}"
 
-# Save /dev/ to rid map
-lsslot=`mktemp`
-lsslot > ${lsslot}
-
-lsblock=`mktemp`
-lsblock > ${lsblock}
-
-blkid=`mktemp`
-blkid > ${blkid}
-
-for dev in `cat ${lsblock} | grep "disk" | awk '{ print $1 }'`
+grep "disk" < "${lsblock}" | awk '{ print $1 }' | while IFS= read -r dev
 do
 
+#	echo "$(date) - Scanning ${dev}..."
+
+	sudo smartctl -a "${dev}" | sudo tee "${smart}" > /dev/null
+
 	# Determine if it's a ssd or hard drive
-	disk_type=`cat ${lsblock} | grep " ${dev} " | tr " " "\n" | grep "disk:" | cut -d ":" -f 2`
+	disk_type=$(grep " ${dev} " "${lsblock}" | tr " " "\n" | grep "disk:" | cut -d ":" -f 2)
 
 	# If it's a hard drive, fetch the rid (I should rewrite this to handle hard drives which *aren't* rids...)
 	rid="norid"
 	if [ "${disk_type}" == "hd" ]; then
-		rid=`cat ${lsslot} | grep "${dev} " | awk '{ print $10 }' | uniq`
+		rid=$(grep "${dev} " "${lsslot}" | awk '{ print $10 }' | uniq)
 
-		if [ -z "${rid}" -o "${rid}" == "norid" -o "${rid}" == "NORID" -o "${rid}" == "Empty" ]; then
-			rid=`cat ${lsblock} | grep " ${dev} " | awk '{ print $2 }' | uniq`
+		if [ -z "${rid}" ] || [ "${rid}" == "norid" ] || [ "${rid}" == "NORID" ] || [ "${rid}" == "Empty" ]; then
+			rid=$(grep " ${dev} " "${lsblock}" | awk '{ print $2 }' | uniq)
 		fi
 
 
-		if [ -z "${rid}" -o "${rid}" == "norid" -o "${rid}" == "NORID" -o "${rid}" == "Empty" ]; then
-			rid=`cat ${blkid} | grep "^${dev}[12]" | tr " " "\n" | grep rid | grep data | cut -d "-" -f 3 | sed "s/\"//g"`
+		if [ -z "${rid}" ] || [ "${rid}" == "norid" ] || [ "${rid}" == "NORID" ] || [ "${rid}" == "Empty" ]; then
+			rid=$(grep "^${dev} " "${lsblock}" | awk '{ print $2 }')
 		fi
 
 	fi
 
-	HD_Size=`cat ${lsblock} | grep " ${dev} " | awk '{ print $11 }'`
-	HD_Vendor=`cat ${lsblock} | grep " ${dev} " | awk '{ print $5 }'`
-	HD_Model=`cat ${lsblock} | grep " ${dev} " | awk '{ print $6 }'`
+	HD_Size=$(grep " ${dev} " "${lsblock}" | awk '{ print $11 }')
+	HD_Vendor=$(grep " ${dev} " "${lsblock}" | awk '{ print $5 }')
+	HD_Model=$(grep " ${dev} " "${lsblock}" | awk '{ print $6 }')
 
 	HD_Capacity="UNKNOWN"
 	case ${HD_Size} in
@@ -63,11 +59,21 @@ do
 			HD_Capacity="4 TB" ;;
 		8001563222016)
 			HD_Capacity="8 TB" ;;
+		64012505776128)
+			HD_Capacity="8 TB" ;;
+		12000138625024)
+			HD_Capacity="12 TB" ;;
 	esac
+
+	### Check for major drive failure
+	Health=$(grep "SMART Health Status" "${smart}" | cut -d ":" -f 2- | grep -v " OK$")
+	if [ ! -z "${Health}" ]; then
+			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is urgently failing!  ${Health}\n" "${dev}"
+	fi
 
  	# Assume drives are SATA by default, since most are...
 	SAS=0
-	SAS_QUERY=`sudo smartctl -i ${dev} | grep -i "Transport protocol:" | grep SAS | wc -l`
+	SAS_QUERY=$(grep -i "Transport protocol:" "${smart}" | grep -c SAS)
 	[ "${SAS_QUERY}" -eq "1" ] && SAS=1
 
 	if [ "${SAS}" == 0 ]; then
@@ -76,42 +82,42 @@ do
 		IGNORE_THESE_ATTRIBUTES="High_Fly_Writes|Load_Cycle_Count"
 
 		# Fetch info on the remaining SMART attributes...
-		sudo smartctl --attributes ${dev} | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | egrep -v "(${IGNORE_THESE_ATTRIBUTES})" > ${attr}
+		grep -E "(Old_age|Pre-fail)" "${smart}" | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | grep -Ev "(${IGNORE_THESE_ATTRIBUTES}|Not_testing)" > "${attr}"
 
 		# Fetch the SMART self-test execution status
-		status=`sudo smartctl -a ${dev} | grep -A 5 "Self-test execution status" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/"`
+		status=$(grep -A 5 "Self-test execution status" "${smart}" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/")
 
 		if [[ "${status}" =~ "The previous self-test completed having the read element of the test failed" ]]; then
-			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a read-element test ${RMA_Status}\n" ${dev}
+			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a read-element test\n" "${dev}"
 		fi
 
 		if [[ "${status}" =~ "The previous self-test completed having a test element that failed and the test element that failed is not known" ]]; then
-			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a test-element test ${RMA_Status}\n" ${dev}
+			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a test-element test\n" "${dev}"
 		fi
 
 		# Iterate over all SMART attributes
-		for attribute in `cat ${attr} | grep "^[1-9]" | cut -d " " -f 1`
+		grep "^[1-9]" < "${attr}" | cut -d " " -f 1 | while IFS= read -r attribute
 		do
 
-			  ATTR_NAME=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 2`
-			CURRENT_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 3 | sed "s/^0*//"` ; [ -z "${CURRENT_VAL}" ] && CURRENT_VAL=0
-			MAXIMUM_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 4 | sed "s/^0*//"` ; [ -z "${MAXIMUM_VAL}" ] && MAXIMUM_VAL=0
-			 THRESH_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 5 | sed "s/^0*//"` ; [ -z "${THRESH_VAL}"  ] && THRESH_VAL=0
-			   REAL_VAL=`cat ${attr} | grep "^${attribute} " | cut -d " " -f 6 | sed "s/^0*//"` ; [ -z "${REAL_VAL}"    ] && REAL_VAL=0
+			  ATTR_NAME=$(grep "^${attribute} " "${attr}" | cut -d " " -f 2)
+			CURRENT_VAL=$(grep "^${attribute} " "${attr}" | cut -d " " -f 3 | sed "s/^0*//") ; [ -z "${CURRENT_VAL}" ] && CURRENT_VAL=0
+			MAXIMUM_VAL=$(grep "^${attribute} " "${attr}" | cut -d " " -f 4 | sed "s/^0*//") ; [ -z "${MAXIMUM_VAL}" ] && MAXIMUM_VAL=0
+			 THRESH_VAL=$(grep "^${attribute} " "${attr}" | cut -d " " -f 5 | sed "s/^0*//") ; [ -z "${THRESH_VAL}"  ] && THRESH_VAL=0
+			   REAL_VAL=$(grep "^${attribute} " "${attr}" | cut -d " " -f 6 | sed "s/^0*//") ; [ -z "${REAL_VAL}"    ] && REAL_VAL=0
 
 			################################
 			### Begin special case handling
 			################################
 
 			# This is a corner case where the val and thresh are all 0.  Just ignore
-			if [ "${CURRENT_VAL}" -eq "0" -a "${MAXIMUM_VAL}" -eq "0" -a "${THRESH_VAL}" -eq "0" ]; then
+			if [ "${CURRENT_VAL}" -eq "0" ] && [ "${MAXIMUM_VAL}" -eq "0" ] && [ "${THRESH_VAL}" -eq "0" ]; then
 				# There's no good way to know if the drive is actually failing, or if this test is screwy.  Just skip.
 				continue
 			fi
 
 			# One Intel SSD has a buggy 233 Media_Wearout_Indicator, so ignore that special case
-			is_bad_intel_ssd=`cat ${lsblock} | grep " ${dev} " | grep SSDSA2M040G2GC | wc -l`
-			if [ "${attribute}" -eq "233" -a "${is_bad_intel_ssd}" -eq "1" ]; then
+			is_bad_intel_ssd=$(grep " ${dev} " "${lsblock}" | grep -c SSDSA2M040G2GC)
+			if [ "${attribute}" -eq "233" ] && [ "${is_bad_intel_ssd}" -eq "1" ]; then
 				continue
 			fi
 
@@ -119,7 +125,7 @@ do
 			THRESH_197="500"
 			if [ "${attribute}" -eq "197" ]; then
 				if [ "${REAL_VAL}" -ge "${THRESH_197}" ]; then
-					printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a 197_Current_Pending_Sector value over ${THRESH_197} ${RMA_Status}\n" ${dev}
+					printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a 197_Current_Pending_Sector value over ${THRESH_197}\n" "${dev}"
 				fi
 			fi
 
@@ -127,29 +133,31 @@ do
 			### End special case handling
 			################################
 
-			DELTA_CURRENT=`echo "${CURRENT_VAL}-${THRESH_VAL}" | bc -l`
+			DELTA_CURRENT=$(echo "${CURRENT_VAL}-${THRESH_VAL}" | bc -l)
 
 			if [ "${DELTA_CURRENT}" -le "0" ]; then
-				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing  on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
-			elif [ "${DELTA_CURRENT}" -lt "10" -a "${DELTA_CURRENT}" -gt 0 -a "${THRESH_VAL}" -lt "50" ]; then
-				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is marginal on SMART attribute %-3s ${ATTR_NAME} ${RMA_Status}\n" ${dev} ${attribute}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing  on SMART attribute %-3s ${ATTR_NAME}\n" "${dev}" "${attribute}"
+			elif [ "${DELTA_CURRENT}" -lt "10" ] && [ "${DELTA_CURRENT}" -gt 0 ] && [ "${THRESH_VAL}" -lt "50" ]; then
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is marginal on SMART attribute %-3s ${ATTR_NAME}\n" "${dev}" "${attribute}"
 			fi
 		done
 	else
 
 		# Assume drive is SAS
-		Defects=`${smart_attributes_exec} ${dev} | grep 9000_SAS_Grown_Defect_List | awk '{ print $2 }'`
+		Defects=$(cat "${smart}" | grep "Elements in grown defect list" | cut -d ":" -f 2 | awk '{ print $1 }')
 
- 		if [ "${Defects}" -gt "0" ]; then
+		# Don't even both printing it if it's just one or two defects
+ 		if [ "${Defects}" -gt "2" ]; then
 
 			if [ "${Defects}" -gt "50" ]; then
-				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a critically-high number of defects (${Defects} defects)\n" ${dev}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a critically-high number of defects (${Defects} defects)\n" "${dev}"
 			else
-				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of defects (${Defects} defects)\n" ${dev}
+				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of defects (${Defects} defects)\n" "${dev}"
 			fi
 		fi
 
 	fi
+
 done
 
-rm -f ${attr} ${lsslot} ${lsblock} ${blkid} ${smartctl}
+rm -f "${attr}" "${lsslot}" "${lsblock}" "${smart}"
