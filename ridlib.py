@@ -55,11 +55,16 @@ def SysExec(cmd):
         # If the cmd is "cat", use fopen/fread/fclose to open it and
         # cache it as we go
         elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
-                CacheTimeArray[cmd] = time.time()
-                f.close()
-                Return_Val = CacheDataArray[cmd]
+		try:
+	                f = open(cmd.split()[1], "r")
+	                CacheDataArray[cmd] = f.read()
+	                CacheTimeArray[cmd] = time.time()
+	                f.close()
+	                Return_Val = CacheDataArray[cmd]
+		except IOError:
+			print("ERROR:  File not accessible")
+		finally:
+			f.close()
 
         # If we don't have cached data, or it's too old, regenerate it
         elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
