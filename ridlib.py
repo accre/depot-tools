@@ -1286,7 +1286,7 @@ def Smart_Attributes(Dev):
 
 			if re.search("^Manufactured in", line):
 				t = re.sub("Manufactured in ", "", line)
-				t = re.sub(" of year ", ",", t)
+				t = re.sub(" of year ", "_", t)
 				t = re.sub(" ", "_", t)
 				Drive_Attributes[9001] = "9001_SAS_Manufacture_Date 0 0 0 " + t
 
@@ -1598,7 +1598,7 @@ def RID_Create(Rid, Dev, AssumeYes = False):
 	logging.info("RID_Create:: Seeing if any existing partitions on drive " + Dev)
 	Parts = []
 
-	PartedFilter = [ "Model", "Disk", "Sector", "Partition", "Number", "unrecognized disk label" ]
+	PartedFilter = [ "Model", "Disk", "Sector", "Partition", "Number", "unrecognized disk label", "Error" ]
 
 	for line in SysExec("parted " + Dev + " print").splitlines():
 
@@ -1641,10 +1641,11 @@ def RID_Create(Rid, Dev, AssumeYes = False):
 
 	# Since we are creating the filesystem, we need to erase any partitions already
 	# on this drive
-	for part in Parts:
-		logging.info("RID_Create:: Clearing old partition " + part + " from drive " + Dev)
-		cmd = "parted -s " + Dev + " rm " + part
-		subprocess.call(cmd.split())
+	if Parts:
+		for part in Parts:
+			logging.info("RID_Create:: Clearing old partition " + part + " from drive " + Dev)
+			cmd = "parted -s " + Dev + " rm " + part
+			subprocess.call(cmd.split())
 
 	# Create a gpt boot label
 	logging.info("RID_Create:: Installing a GPT label on " + Dev)
