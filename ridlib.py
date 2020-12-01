@@ -21,6 +21,8 @@ import subprocess
 import collections
 import configparser
 import multiprocessing
+import ctypes
+import ctypes.util
 
 from subprocess import Popen, PIPE, STDOUT, call, check_output
 from time import gmtime, strftime, sleep
@@ -861,15 +863,25 @@ def IBP_Server_Start():
 			logging.error("Please lower the number of threads or increase the system wide max fd.")
 			sys.exit(1)
 
-	cmd = "LD_PRELOAD=\"/usr/local/lib/libtcmalloc.so\" " + ibp_server_exe + " " + " ".join(sys.argv[1:])
-	logging.info("Attempting to run command: " + cmd)
+	tcmalloc = ctypes.util.find_library('tcmalloc')
 
 	args = [ ibp_server_exe ]
 	args.extend(sys.argv[1:])
 
 	env = {}
-	env["LD_LIBRARY_PATH"] = "/usr/local/lib"
-	env["LD_PRELOAD"]      = "/usr/local/lib/libtcmalloc.so"
+	env_print = ""
+	if tcmalloc:
+		env["LD_PRELOAD"] = tcmalloc
+		env_print = "LD_PRELOAD=" + tcmalloc
+	if os.getenv('HEAPPROFILE'):
+		env['HEAPPROFILE'] = os.getenv('HEAPPROFILE')
+		env_print = env_print + " HEAPPROFILE=" + env['HEAPPROFILE']
+	if os.getenv('HEAPPROFILESIGNAL'):
+		env['HEAPPROFILESIGNAL'] = os.getenv('HEAPPROFILESIGNAL')
+		env_print = env_print + " HEAPPROFILESIGNAL=" + env['HEAPPROFILESIGNAL']
+
+	cmd = env_print + " " + ibp_server_exe + " " + " ".join(sys.argv[1:])
+	logging.info("Attempting to run command: " + cmd)
 
 	subprocess.Popen(args=args, env = env)
 
@@ -1696,11 +1708,13 @@ def RID_Create(Rid, Dev, AssumeYes = False):
 	mkfs_resource_exe = which("mkfs.resource")
 	if not mkfs_resource_exe:
 		mkfs_resource_exe = which("mkfs_resource")
+	logging.info("RID_Create:: Using " + mkfs_resource_exe + "for our mkfs resource command")
 
 	if not mkfs_resource_exe:
 		logging.error("Can't locate mkfs.resource in the PATH!  Aborting!")
 
 	cmd = mkfs_resource_exe + " " + Rid + " dir " + Rname + "/data " + Rname + "/md"
+	logging.info("RID_Create:: Executing command: " + cmd)
 	Config = SysExec(cmd)
 #	Config = subprocess.call(cmd.split())
 
