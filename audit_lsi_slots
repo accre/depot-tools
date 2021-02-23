@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+# Use the low-level "sg_ses" tool combined with storcli64 to find empty/failed slots
+# on depots.   Note that this doesn't work on the earliest generation depots because 
+# their HBA uses sas2ircu instead of storcli64
+
+# Get the model of HBA, since we have to adjust this check on a per-model basis...
+hba=$(storcli64 /c0 show | grep "Product Name" | cut -d "=" -f 2 | sed "s/^ *//")
+
+# If the hba model is empty, the hba doesn't support storecli64 so you may as well quit now
+if [ -z "${hba}" ]; then
+#	echo "ERROR:  This HBA doesn't support storcli"
+	exit 1
+fi
+
+shift=0
+if [[ "${hba}" =~ "AVAGO MegaRAID SAS 9361-8i" ]]; then
+	shift=1
+fi
+#echo "DEBUG:  shift=${shift}"
+
+# Get a list of all EID's and expected # of drives from storcli based on the number of slots
+tmp=$(mktemp)
+storcli64 /c0 show all | grep -E -A 10 "(Enclosure Information|Enclosure LIST )" | grep -Ev "(Enclosure Information|==========|----------|VendorSpecific|SGPIO|Enclosure LIST)" | grep -v ^$ | head -n 2 | awk '{ print $1, $3 }' | tr " " ":" > ${tmp}
+
+# Get a list of all LSI-visible drives
+tmp2=$(mktemp)
+storcli64 /c0 show | grep -A 50 "PD LIST" | grep [0-9]:[0-9] | awk '{ print $1 }' | sort -n > ${tmp2}
+
+tmp3=$(mktemp)
+# This is a retarded way of doing this, but apparenly that's The Bash Way...
+for bp in $(cat ${tmp})
+do
+	eid=$(echo ${bp} | cut -d ":" -f 1)
+	num=$(echo ${bp} | cut -d ":" -f 2); num=$((num-1+shift))
+
+	for n in $(seq ${shift} ${num})
+	do
+		echo "${eid}:${n}" >> ${tmp3}
+	done
+done
+tmp4=$(mktemp)
+cat ${tmp3} | sort -n > ${tmp4}
+
+#echo "DEBUG:  tmp2 = "
+#cat ${tmp2}
+#echo
+#echo "DEBUG:  tmp4 = "
+#cat ${tmp4}
+
+diff=$(diff ${tmp2} ${tmp4} | grep ">" | cut -d " " -f 2 | tr "\n" " ")
+
+[ ! -z "${diff}" ] && echo "${HOSTNAME} ${hba} missing drives = ${diff}"
+
+rm -f ${tmp} ${tmp2} ${tmp3} ${tmp4}
