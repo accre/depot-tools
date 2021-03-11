@@ -13,7 +13,7 @@ import logging
 
 from ridlib import *
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
 
 def Help_RID_Create():
 	print("")

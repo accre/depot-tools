@@ -10,6 +10,7 @@ import re
 import stat
 import shutil
 import logging
+import argparse
 
 from ridlib import *
 
@@ -18,24 +19,18 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 depot_dir = "/depot"
 md_dir = depot_dir + "/import"
 
-def Help_RID_Export():
-	print("")
-	print(sys.argv[0] + " - Export the Rid metadata from the local SSD back to the data drive")
-	print("")
-	print("Usage:  " + sys.argv[0] + " <Rid>")
-	print("")
-	sys.exit(1)
+parser = argparse.ArgumentParser(description=' - Export the Rid metadata from the local SSD back to the data drive')
 
-if len(sys.argv) != 2:
-	Help_RID_Export()
+parser.add_argument('--snap', help='Export snapshot metadata rather than whole metadata', action='store_true')
+parser.add_argument('rid',    metavar = 'rid', type=ascii, help='The RID you want to export')
+parser.add_argument('--md_dir', metavar = '<md_dir>', type=ascii, help='The path to the metadata directory', default = md_dir)
 
-Rid = sys.argv[1]
+args = parser.parse_args()
 
-if len (sys.argv) == 3:
-	md_dir = sys.argv[2]
-else:
-	md_dir = depot_dir + "/import"
+snap   = args.snap
+rid    = re.sub("'", "", args.rid)
+md_dir = re.sub("'", "", args.md_dir)
 
-#logging.info("Rid = " + Rid + " and md_dir = " + md_dir)
+logging.debug("export_rid.py::  rid = " + rid + " and md_dir = " + md_dir + " and snap = " + str(snap))
 
-RID_Export(Rid, md_dir)
+RID_Export(rid, md_dir, Snap = snap)
