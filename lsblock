@@ -129,9 +129,9 @@ class BlockDevice(object):
 
 def which(program):
 
-        """ 
+        """
 
-        Functions similar to the 'which' program in Unix.  Given 
+        Functions similar to the 'which' program in Unix.  Given
         an executable filename, it will return the whole path to
         that executable.
 
@@ -182,7 +182,7 @@ def Bin_Requires(bin):
         return bin_path
 
 
-# If a recommended binary isn't available, you can still run, but let 
+# If a recommended binary isn't available, you can still run, but let
 # the user know it would work better if the binary was available
 def Bin_Recommends(bin):
         bin_path = which(bin)
@@ -270,7 +270,7 @@ def Query_SysDevice(SD_Device):
 
         Sysfsp1 = os.readlink(Drive).split(" ")[-1]
 
-        # We want the full path (/sys/devices/foo/bar/etc) to ensure consistency 
+        # We want the full path (/sys/devices/foo/bar/etc) to ensure consistency
         Sysfs = "/sys/" + re.sub("^(../)*", "", Sysfsp1).strip()
 
         return Sysfs
@@ -288,7 +288,10 @@ def Query_SysClassScsiDevice(SD_Device, Key):
         Sysfs = Query_SysDevice(SD_Device)
         Target = SplitSysfsString(Sysfs)[2].split("/")[1].strip()
 
-        sysfile = "/sys/class/scsi_device/" + Target + "/device/" + Key
+        if re.search("nvme", Target):
+                sysfile = "/sys/class/nvme/" + Target + "/device/" + Key
+        else:
+                sysfile = "/sys/class/scsi_device/" + Target + "/device/" + Key
 
         if os.path.isfile(sysfile) or os.path.islink(sysfile):
                 return SysExec("cat " + sysfile).strip()
@@ -304,13 +307,13 @@ def SplitSysfsString(Sysfs):
 
         Sysfs_array = Sysfs.split("/")
 
-        # The "Host"  is *always* the first 2 entries (at least I've never found any exceptions)
-        Host = "/".join(Sysfs_array[3:5])
-
         # Test for the keyword "target" in Sysfs.  If it exists (which is the usual case), then
         # the device is handled by the Linux SCSI subsystem (this is true even it it's not a true
         # SCSI device, for instance a SATA hard drive.)
         if re.search("target", Sysfs):
+
+                # The "Host"  is *always* the first 2 entries (at least I've never found any exceptions)
+                Host = "/".join(Sysfs_array[3:5])
 
                 # Target is everything after (and including) "/target"
                 TestTarget = Sysfs_array[5:]
@@ -324,18 +327,17 @@ def SplitSysfsString(Sysfs):
                 Intermediate = "/".join(Sysfs_array[len(Host.split("/")) + 3:-len(Target.split("/"))])
 
         else:
-                # This is currently a SWAG to cover one weird machine that my testing uncovered.
-                # The weird drive is a older "/dev/hd" type device that does not use the SCSI subsystem.
-                # It probably isn't a good general solution.  Please let me know if you find an exception.
-                Target = "/".join(Sysfs_array[-2:])
-                Intermediate = ""
+                if re.search("nvme", Sysfs):
+                        Host = "/".join(Sysfs_array[3:6])
+                        Target = "/".join(Sysfs_array[-3:])
+                        Intermediate = ""
 
         return Host, Intermediate, Target
 
 
 def ReturnSysfsValue(Sysfs, File):
 
-        """ 
+        """
         Take a File in Sysfs, starting with the full Sysfs string, and recursing upwards until a match is
         found, and then return the contents of the first matching file.
         """
@@ -382,10 +384,15 @@ def Query_udevadm(SD_Device, Key):
                                    "Is_DVD":       "ID_CDROM_DVD",    \
                                    "Is_Bluray":    "ID_CDROM_BD"      }
 
-
 	# Get the machine-friendly version of the string.
 	if Human_Readable_Mapping[Key]:
 		Key = Human_Readable_Mapping[Key]
+
+	if re.search("nvme", SD_Device):
+		if Key == "ID_REVISION":
+			SD_Part = SD_Device.split("/")[-1]
+			cmd = "cat /sys/block/" + SD_Part + "/device/firmware_rev"
+			return SysExec(cmd).strip()
 
 	if UDEVADM_BIN.endswith("udevinfo"):
 		udev_cmd = UDEVADM_BIN + " -q env -n " + SD_Device
@@ -403,9 +410,9 @@ def Query_udevadm(SD_Device, Key):
 		for line in SysExec(udev_cmd).splitlines():
 			if line.startswith(Key + "="):
 				Val = line.split("=")[1]
-	
+
 	return Val
-	
+
 
 def Query_lspci(pciid):
 
@@ -415,7 +422,7 @@ def Query_lspci(pciid):
 
 	# pciid normally looks like:  0000:80:07.0
 	# split it off to:                 80:07.0
-	
+
 	# This is is backwards-compatible with the 'tarded version of python in RHEL5
 	pciid_grep = pciid.split(":")
 	pciid_grep.pop(0)
@@ -427,7 +434,7 @@ def Query_lspci(pciid):
 
 	for line in SysExec(LSPCI_BIN + " -mm").splitlines():
 		if line.startswith(pciid_grep):
-		
+
 			DeviceType = line.split("\"")[1]
 			DeviceMfg  = line.split("\"")[3]
 			DeviceName = line.split("\"")[5]
@@ -443,6 +450,8 @@ def LookupInterconnect(string):
 
 	Interconnect = "UNKNOWN"
 
+	if re.search("Non-Volatile memory controller", string):
+		Interconnect = "NVME"
 	if re.search("SATA controller:", string):
 		Interconnect = "SATA"
 	if (re.search("USB Controller:", string)) or (re.search("USB controller", string)):
@@ -601,6 +610,8 @@ def FindMediaType(SD_Device):
 	                    "(0x18) ", "(0x19) ", "(0x1a) ", "(0x1b) ", "(0x1c) ", "(0x1e) ",
 	                    "wlun   ", "no dev " ]
 
+	if re.search("nvme", SD_Device):
+		return "disk:ssd"
 
 	# On old /dev/hd* machines, you might be able to get the media this way
 	if SD_Device.startswith("/dev/hd"):
@@ -622,17 +633,19 @@ def FindMediaType(SD_Device):
         # If Media is "disk", let's try to narrow it down (harddisk, ssd, etc.)
 	if Media == "disk":
 
+		if re.search("^nvme", SD_Device.split("/")[-1]):
+			Media = "disk:ssd"
+
 		ReadFile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/rotational"
 
 		if os.path.isfile(ReadFile) or os.path.islink(ReadFile):
 			is_rotating = int(SysExec("cat " + ReadFile).strip())
-	
+
 			# This is of necessity a guess...
-			if is_rotating == 1:	# Probably a hard disk			
+			if is_rotating == 1:	# Probably a hard disk
 				Media = "disk:hd"
 			elif is_rotating == 0:
 				Media = "disk:ssd"
-
 
 	if Media == "cd/dvd":
 
@@ -649,7 +662,7 @@ def FindMediaType(SD_Device):
 
 
 	# It would be nice to be able to query the USB bus and determine if a
-	# block device is a hard drive, flash drive, SSD, CD-ROM, etc. 
+	# block device is a hard drive, flash drive, SSD, CD-ROM, etc.
 
 	# You can use "lsusb -t" to see if the device is "Self Powered" or "Bus Powered"
 	# and get a rough idea if it's a USB flash (bus powered) or anything else (self-powered)
@@ -835,6 +848,9 @@ def HumanFriendlyVendor(Vendor, Model):
                 if Model.startswith("Optiarc"):
                         Vendor = "Optiarc"
 
+        if re.search("KINGSTON", Model):
+                Vendor = "Kingston"
+
         # Seagate is all the fark over the place...
         if Vendor.startswith("ST"):
                 Vendor = "Seagate"
@@ -897,6 +913,9 @@ def HumanFriendlyModel(SD_Device, Vendor, Model):
                 Model = re.sub("Lite-On","", Model).strip()
                 Model = re.sub("LITE-ON","", Model).strip()
 
+        if re.search("KINGSTON", Model):
+                Model = re.sub("KINGSTON ", "", Model)
+
         if Model.startswith("WDC"):
                 Model = re.sub("^WDC", "", Model).strip()
 
@@ -954,7 +973,7 @@ def HumanFriendlySerial(Serial, Vendor, Model):
         Serial = re.sub("^(_)*","", Serial)      # Filter out leading "_"
         Serial = re.sub("(_)*$","", Serial)      # Filter out trailing "_"
         Serial = re.sub("^-", "", Serial)        # Another edge case... (WDC...)
-        Serial = re.sub("^WD-", "", Serial)      # Yet another WDC edge case... 
+        Serial = re.sub("^WD-", "", Serial)      # Yet another WDC edge case...
         Serial = Serial.strip()                  # and strip
 
         if not Serial:
@@ -967,7 +986,7 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 def CallSMART(SD_Device, Verb):
 
 	VALID_VERBS = [ "test", "status" ]
-	
+
 	# If it isn't a valid Verb, just return the current value
 	if not Verb in VALID_VERBS:
 		return False
@@ -1013,8 +1032,8 @@ def CallSMART(SD_Device, Verb):
 
 
 ####################################################
-## Here are the parameters I want to print 
-## (you should be able to use any in the BlockDevice class, 
+## Here are the parameters I want to print
+## (you should be able to use any in the BlockDevice class,
 ## though there are several I haven't tested.
 ####################################################
 
@@ -1092,12 +1111,11 @@ for item in devlist:
         if item.startswith("zram"):     # ZRam compressed ramdisk/swap
                 continue
 
-
         ValidBlockDevices.append(item)
 
 
 #####################################################
-## Sort the ValidBlockDevice array to make it 
+## Sort the ValidBlockDevice array to make it
 ## prettier and more helpful (ie, sda before sdc before sdab)
 #####################################################
 min_length = 100
@@ -1130,7 +1148,7 @@ ValidBlockDevices = TmpValidBlockDevices
 #####################################################
 BlockDeviceInfo = {}
 
-# This loop is the slowest part of the whole program.  
+# This loop is the slowest part of the whole program.
 # Figure out why and fix it...
 for device in ValidBlockDevices:
         BlockDeviceInfo[device] = BlockDevice("/dev/" + device)
