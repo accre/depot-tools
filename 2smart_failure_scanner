@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 
-### Create some temp files so we can cache output
-attr=$(mktemp)
-smart=$(mktemp)
-lsslot=$(mktemp)
-lsblock=$(mktemp)
+# See if we're using the python or bash based depot mgmt scripts and react accordingly.
+[ -e "/usr/local/bin/smart_attributes"    ] && smart_attributes_exec="smart_attributes"
+[ -e "/usr/local/bin/smart_attributes.py" ] && smart_attributes_exec="smart_attributes.py"
 
-lsslot  > "${lsslot}"
+attr=$(mktemp)
+smartctl=$(mktemp)
+
+# Save /dev/ to rid map
+lsslot=$(mktemp)
+lsslot > "${lsslot}"
+
+lsblock=$(mktemp)
 lsblock > "${lsblock}"
 
-grep "disk" < "${lsblock}" | awk '{ print $1 }' | while IFS= read -r dev
+blkid=$(mktemp)
+blkid > "${blkid}"
+
+for dev in $(grep "disk" "${lsblock}"  awk '{ print $1 }')
 do
-
-#	echo "$(date) - Scanning ${dev}..."
-
-	sudo smartctl -a "${dev}" | sudo tee "${smart}" > /dev/null
 
 	# Determine if it's a ssd or hard drive
 	disk_type=$(grep " ${dev} " "${lsblock}" | tr " " "\n" | grep "disk:" | cut -d ":" -f 2)
@@ -30,7 +34,7 @@ do
 
 
 		if [ -z "${rid}" ] || [ "${rid}" == "norid" ] || [ "${rid}" == "NORID" ] || [ "${rid}" == "Empty" ]; then
-			rid=$(grep "^${dev} " "${lsblock}" | awk '{ print $2 }')
+			rid=$(grep "^${dev}[12]" "${blkid}" | tr " " "\n" | grep rid | grep data | cut -d "-" -f 3 | sed "s/\"//g")
 		fi
 
 	fi
@@ -59,21 +63,11 @@ do
 			HD_Capacity="4 TB" ;;
 		8001563222016)
 			HD_Capacity="8 TB" ;;
-		64012505776128)
-			HD_Capacity="8 TB" ;;
-		12000138625024)
-			HD_Capacity="12 TB" ;;
 	esac
 
-	### Check for major drive failure
-	Health=$(grep "SMART Health Status" "${smart}" | cut -d ":" -f 2- | grep -v " OK$")
-	if [ ! -z "${Health}" ]; then
-			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is urgently failing!  ${Health}\n" "${dev}"
-	fi
-
- 	# Assume drives are SATA by default, since most are...
+	# Assume drives are SATA by default, since most are...
 	SAS=0
-	SAS_QUERY=$(grep -i "Transport protocol:" "${smart}" | grep -c SAS)
+	SAS_QUERY=$(sudo smartctl -i "${dev}" | grep -i "Transport protocol:" | grep -c SAS)
 	[ "${SAS_QUERY}" -eq "1" ] && SAS=1
 
 	if [ "${SAS}" == 0 ]; then
@@ -82,10 +76,10 @@ do
 		IGNORE_THESE_ATTRIBUTES="High_Fly_Writes|Load_Cycle_Count"
 
 		# Fetch info on the remaining SMART attributes...
-		grep -E "(Old_age|Pre-fail)" "${smart}" | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | grep -Ev "(${IGNORE_THESE_ATTRIBUTES}|Not_testing)" > "${attr}"
+		sudo smartctl --attributes "${dev}" | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | grep -Ev "(${IGNORE_THESE_ATTRIBUTES})" > "${attr}"
 
 		# Fetch the SMART self-test execution status
-		status=$(grep -A 5 "Self-test execution status" "${smart}" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/")
+		status=$(sudo smartctl -a "${dev}" | grep -A 5 "Self-test execution status" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/")
 
 		if [[ "${status}" =~ "The previous self-test completed having the read element of the test failed" ]]; then
 			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a read-element test\n" "${dev}"
@@ -96,7 +90,7 @@ do
 		fi
 
 		# Iterate over all SMART attributes
-		grep "^[1-9]" < "${attr}" | cut -d " " -f 1 | while IFS= read -r attribute
+		for attribute in $(grep "^[1-9]" "${attr}" | cut -d " " -f 1)
 		do
 
 			  ATTR_NAME=$(grep "^${attribute} " "${attr}" | cut -d " " -f 2)
@@ -144,11 +138,9 @@ do
 	else
 
 		# Assume drive is SAS
-		Defects=$(cat "${smart}" | grep "Elements in grown defect list" | cut -d ":" -f 2 | awk '{ print $1 }')
-		[ -z "${Defects}" ] && Defects=0
+		Defects=$(${smart_attributes_exec} "${dev}" | grep 9000_SAS_Grown_Defect_List | awk '{ print $2 }')
 
-		# Don't even both printing it if it's just one or two defects
- 		if [ "${Defects}" -gt "2" ]; then
+		if [ "${Defects}" -gt "0" ]; then
 
 			if [ "${Defects}" -gt "50" ]; then
 				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a critically-high number of defects (${Defects} defects)\n" "${dev}"
@@ -157,29 +149,7 @@ do
 			fi
 		fi
 
-		NonMedium=$(cat "${smart}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
-		[ -z "${NonMedium}" ] && NonMedium="0"
-
-		if [ "${NonMedium}" -gt "0" ]; then
-			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of Non-medium errors (${NonMedium})\n" "${dev}"
-		fi
-
-		smart_failing=$(cat "${smart}" | grep -i "A mandatory SMART command failed" | wc -l)
-
-		if [ "${smart_failing}" -gt "0" ]; then
-			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing mandatory SMART commands\n" "${dev}"
-		fi
-
-
-		total_uncorrected_errors=$(smartctl -a /dev/sdn | egrep "(read|write):" | rev | cut -d " " -f 1 | rev | grep -v 0)
-		[ ! -z "${total_uncorrected_errors}" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total uncorrected errors greater than 0\n" "${dev}"
-
-		correction_algorithm_invocations=$(smartctl -a /dev/sdn | egrep "(read|write):" | rev | awk '{ print $3 }' | rev | grep -v ^0$)
-		[ ! -z "${correction_algorithm_invocations}" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has correction algorithm invocations greater than 0\n" "${dev}"
-
-
 	fi
-
 done
 
-rm -f "${attr}" "${lsslot}" "${lsblock}" "${smart}"
+rm -f "${attr}" "${lsslot}" "${lsblock}" "${blkid}" "${smartctl}"
