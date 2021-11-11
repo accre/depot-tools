@@ -264,9 +264,9 @@ if SAS_Controller == "LSI_Thunderbolt" or SAS_Controller == "LSI_Falcon" or SAS_
 	State = sys.argv[3]
 
 	if re.search("on", State, re.IGNORECASE):
-		Verb = "--set=devoff"
-	if re.search("off", State, re.IGNORECASE):
 		Verb = "--clear=devoff"
+	if re.search("off", State, re.IGNORECASE):
+		Verb = "--get=devoff"
 
 	print("Setting the power state for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
 	SysExec("sg_ses -I " + sys.argv[2] + " " + Verb + " " + SG_Dev)
