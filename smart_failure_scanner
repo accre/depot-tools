@@ -71,7 +71,7 @@ do
 			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is urgently failing!  ${Health}\n" "${dev}"
 	fi
 
- 	# Assume drives are SATA by default, since most are...
+	# Assume drives are SATA by default, since most are...
 	SAS=0
 	SAS_QUERY=$(grep -i "Transport protocol:" "${smart}" | grep -c SAS)
 	[ "${SAS_QUERY}" -eq "1" ] && SAS=1
@@ -134,10 +134,13 @@ do
 			################################
 
 			DELTA_CURRENT=$(echo "${CURRENT_VAL}-${THRESH_VAL}" | bc -l)
+			[ -z "${DELTA_CURRENT}" ] && DELTA_CURRENT=0
 
 			if [ "${DELTA_CURRENT}" -le "0" ]; then
 				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing  on SMART attribute %-3s ${ATTR_NAME}\n" "${dev}" "${attribute}"
 			elif [ "${DELTA_CURRENT}" -lt "10" ] && [ "${DELTA_CURRENT}" -gt 0 ] && [ "${THRESH_VAL}" -lt "50" ]; then
+				# Skip the drives with marginal Power_On_Hours
+				[ "${ATTR_NAME}" == "Power_On_Hours" ] && continue
 				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is marginal on SMART attribute %-3s ${ATTR_NAME}\n" "${dev}" "${attribute}"
 			fi
 		done
@@ -148,7 +151,7 @@ do
 		[ -z "${Defects}" ] && Defects=0
 
 		# Don't even both printing it if it's just one or two defects
- 		if [ "${Defects}" -gt "2" ]; then
+		if [ "${Defects}" -gt "2" ]; then
 
 			if [ "${Defects}" -gt "50" ]; then
 				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a critically-high number of defects (${Defects} defects)\n" "${dev}"
@@ -157,12 +160,14 @@ do
 			fi
 		fi
 
-		NonMedium=$(cat "${smart}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
-		[ -z "${NonMedium}" ] && NonMedium="0"
+# Disable this for general testing, but uncomment if you're trying to 
+# find depots with bad HBA's or cabling
+#		NonMedium=$(cat "${smart}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
+#		[ -z "${NonMedium}" ] && NonMedium="0"
 
-		if [ "${NonMedium}" -gt "0" ]; then
-			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of Non-medium errors (${NonMedium})\n" "${dev}"
-		fi
+#		if [ "${NonMedium}" -gt "0" ]; then
+#			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of Non-medium errors (${NonMedium})\n" "${dev}"
+#		fi
 
 		smart_failing=$(cat "${smart}" | grep -i "A mandatory SMART command failed" | wc -l)
 
@@ -170,16 +175,30 @@ do
 			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing mandatory SMART commands\n" "${dev}"
 		fi
 
+		total_read_uncorrected_errors=$(cat "${smart}" | grep "^read:" | rev | cut -d " " -f 1 | rev)
+		[ -z "${total_read_uncorrected_errors}" ] && total_read_uncorrected_errors=0
+		[ "${total_read_uncorrected_errors}" -gt 10 ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total read uncorrected errors greater than 10 (${total_read_uncorrected_errors})\n" "${dev}"
 
-		total_uncorrected_errors=$(smartctl -a /dev/sdn | egrep "(read|write):" | rev | cut -d " " -f 1 | rev | grep -v 0)
-		[ ! -z "${total_uncorrected_errors}" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total uncorrected errors greater than 0\n" "${dev}"
+		total_write_uncorrected_errors=$(cat "${smart}" | grep "^write:" | rev | cut -d " " -f 1 | rev)
+		[ -z "${total_write_uncorrected_errors}" ] && total_write_uncorrected_errors=0
+		[ "${total_write_uncorrected_errors}" -gt 10 ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total write uncorrected errors greater than 10 (${total_write_uncorrected_errors})\n" "${dev}"
 
-		correction_algorithm_invocations=$(smartctl -a /dev/sdn | egrep "(read|write):" | rev | awk '{ print $3 }' | rev | grep -v ^0$)
-		[ ! -z "${correction_algorithm_invocations}" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has correction algorithm invocations greater than 0\n" "${dev}"
+#		read_correction_algorithm_invocations=$(cat "${smart}" | grep "^read:" | rev | awk '{ print $3 }' | rev)
+#		[ -z "${read_correction_algorithm_invocations}" ] && read_correction_algorithm_invocations=0
+#		[ "${read_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has read correction algorithm invocations greater than 10 (${read_correction_algorithm_invocations})\n" "${dev}"
+
+#		write_correction_algorithm_invocations=$(cat "${smart}" | egrep "^write:" | rev | awk '{ print $3 }' | rev)
+#		[ -z "${write_correction_algorithm_invocations}" ] && write_correction_algorithm_invocations=0
+#		[ "${write_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has write correction algorithm invocations greater than 10 (${write_correction_algorithm_invocations})\n" "${dev}"
+
+		smart_test_segment_failure=$(cat "${smart}" | grep "Failed in segment" | wc -l)
+		[ -z "${smart_test_segment_failure}" ] && smart_test_segment_failure=0
+		[ "${smart_test_segment_failure}" -gt "0" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has SMART test failed in segment errors (${smart_test_segment_failure})\n" "${dev}"
+
+
 
 
 	fi
-
 done
 
 rm -f "${attr}" "${lsslot}" "${lsblock}" "${smart}"
