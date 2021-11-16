@@ -147,6 +147,9 @@ for e in enclosures:
 	# Blank dictionary for this enclosure
 	sg_ses_dict[e] = {}
 
+	slots = List_Slots(e)
+	Debug("Slots for Enclosure " + e + " = " + str(slots))
+
 	for s in slots:
 
 		sg_ses_dict[e][s] = {}
