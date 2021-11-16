@@ -316,9 +316,7 @@ keys_whitelist = [
 	"SCSI_IDENT_SERIAL",\
 	"SCSI_REVISION",\
 	"ID_BUS",\
-	"ID_ATA_ROTATION_RATE_RPM",\
-#	"ID_SERIAL_SHORT",\
-#	"ID_WWN",\
+	"MEDIA_TYPE",\
 	"SCSI_IDENT_PORT_NAA_REG",\
 	"ID_PATH"]
 
@@ -330,6 +328,14 @@ for bd in blockdevs:
 	# Blank dictionary for this enclosure
 	udevadm_dict[bd] = {}
 
+	# udevadm lies about whether whether the drive spins or not, so check under /sys/block
+	rotation = int(SysExec("cat /sys/block/" + bd.split("/")[2] + "/queue/rotational"))
+
+	if rotation == 0:
+		udevadm_dict[bd]["MEDIA_TYPE"] = "ssd"
+	else:
+		udevadm_dict[bd]["MEDIA_TYPE"] = "hd"
+
 	# Parse "udevadm" output
 	udevadm_output = SysExec("udevadm info --query=property --name=" + bd)
 	for line in udevadm_output.splitlines():
@@ -337,9 +343,6 @@ for bd in blockdevs:
 
 		key = line.split("=")[0]
 		val = line.split("=")[1]
-
-#		if not key in keys_whitelist:
-#			continue
 
 		Debug("bd " + bd + " key " + key + " val = " + val)
 
@@ -350,6 +353,14 @@ udevadm_dict = {key:udevadm_dict[key] for key in sorted_keys}
 
 ### Now we want to iterate over and simplify/clarify a few things
 for bd in udevadm_dict:
+
+	if "ID_TYPE" in udevadm_dict[bd]:
+		if udevadm_dict[bd]["ID_TYPE"] == "disk":
+			udevadm_dict[bd]["MEDIA_TYPE"] = "disk:" + udevadm_dict[bd]["MEDIA_TYPE"]
+		elif udevadm_dict[bd]["ID_TYPE"] == "cd":
+			udevadm_dict[bd]["ID_TYPE"] == "cd"
+		else:
+			udevadm_dict[bd]["MEDIA_TYPE"] = udevadm_dict[bd]["ID_TYPE"]
 
 	# If it doesn't have a SCSI serial #, see if there's a SATA serial # and use that
 	if not "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
