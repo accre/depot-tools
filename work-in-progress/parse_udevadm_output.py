@@ -17,7 +17,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 # Cache info from SysExec
 CacheDataArray = {}
