@@ -17,7 +17,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -87,8 +87,17 @@ def List_BlockDevices():
 	# Remove unwanted block devices
 	Filtered_Block_Devs = []
 	for i in Block_Devs:
+
 		# Remove loopback devices
 		if re.search("/dev/loop", i):
+			continue
+
+		# Remove compressed ramdisks
+		if re.search("/dev/zram", i):
+			continue
+
+		# Remove RAID devices
+		if re.search("/dev/md", i):
 			continue
 
 		Filtered_Block_Devs.append(i)
@@ -154,6 +163,12 @@ def HumanFriendlyVendor(Vendor, Model):
 
 		if re.search("iHAS", Model):
 			Vendor = "LiteOn"
+
+		if re.search("Samsung", Model, re.I):
+			Vendor = "Samsung"
+
+		if re.search("^OCZ", Model):
+			Vendor = "OCZ"
 
 	if re.search("KINGSTON", Model):
 		Vendor = "Kingston"
@@ -252,6 +267,34 @@ def HumanFriendlyModel(Vendor, Model):
 	return Model.strip()
 
 
+def HumanFriendlySerial(Serial, Vendor, Model):
+	"""
+	Try to de-crapify the Serial Number (again, polluted with other fields)
+	"""
+
+	NO_SERIAL = "NO_SERIAL"
+
+	if Serial == Model:
+		return NO_SERIAL
+
+	Serial = Serial.split("_")[-1]
+
+	Serial = re.sub("^SATA","", Serial)      # one drive starts with "SATA_"
+	Serial = re.sub(Model,"", Serial)        # Filter out the model
+	Serial = re.sub(Model[:-1],"", Serial)   # Filter out the model (catches an edge case with WDC <bangs head>)
+	Serial = re.sub(Vendor, "", Serial)      # Filter out the Vendor
+	Serial = re.sub("^(_)*","", Serial)      # Filter out leading "_"
+	Serial = re.sub("(_)*$","", Serial)      # Filter out trailing "_"
+	Serial = re.sub("^-", "", Serial)        # Another edge case... (WDC...)
+	Serial = re.sub("^WD-", "", Serial)      # Yet another WDC edge case...
+	Serial = Serial.strip()                  # and strip
+
+	if not Serial:
+		Serial = "NO_SERIAL"
+
+	return Serial
+
+
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
 udevadm_dict = {}
@@ -324,8 +367,13 @@ for bd in udevadm_dict:
 	if not "SCSI_VENDOR" in udevadm_dict[bd]:
 		udevadm_dict[bd]["SCSI_VENDOR"] = " "
 
-	udevadm_dict[bd]["SCSI_VENDOR"] = HumanFriendlyVendor(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
-	udevadm_dict[bd]["ID_MODEL"]    = HumanFriendlyModel(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+	if "ID_MODEL" in udevadm_dict[bd]:
+		udevadm_dict[bd]["SCSI_VENDOR"] = HumanFriendlyVendor(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+
+	if "SCSI_VENDOR" in udevadm_dict[bd]:
+		udevadm_dict[bd]["ID_MODEL"]    = HumanFriendlyModel(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+
+	udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = HumanFriendlySerial(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
 
 	if "ID_BUS" in udevadm_dict[bd]:
 		if udevadm_dict[bd]['ID_BUS'] == "nvme":
