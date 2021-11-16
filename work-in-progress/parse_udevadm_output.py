@@ -356,7 +356,7 @@ for bd in udevadm_dict:
 
 	if "ID_TYPE" in udevadm_dict[bd]:
 		if udevadm_dict[bd]["ID_TYPE"] == "disk":
-			udevadm_dict[bd]["MEDIA_TYPE"] = "disk:" + udevadm_dict[bd]["MEDIA_TYPE"]
+			udevadm_dict[bd]["MEDIA_TYPE"] = udevadm_dict[bd]["MEDIA_TYPE"]
 		elif udevadm_dict[bd]["ID_TYPE"] == "cd":
 			udevadm_dict[bd]["ID_TYPE"] == "cd"
 		else:
