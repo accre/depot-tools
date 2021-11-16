@@ -3,7 +3,7 @@
 """
 Parse the output of the "udevadm" utility and print the useful stuff
 
-Dependencies:  lsscsi, python "prettytable" package
+Dependencies:  lsscsi, python "prettytable" package, smartctl (for NVME drives)
 
 """
 
@@ -25,56 +25,56 @@ CacheTimeArray = {}
 
 def Debug(text):
 
-        """
-        A wrapper to print debugging info on a single line.
-        """
+	"""
+	A wrapper to print debugging info on a single line.
+	"""
 
-        if Print_Debug:
-                print("DEBUG: " + text)
-        return()
+	if Print_Debug:
+		print("DEBUG: " + text)
+	return()
 
 
 def SysExec(cmd):
 
-        """
-        Run the given command and return the output
-        """
+	"""
+	Run the given command and return the output
+	"""
 
-        # Cache the output of the command for 20 seconds
-        Cache_Expires = 20
+	# Cache the output of the command for 20 seconds
+	Cache_Expires = 20
 
-        # Computed once, used twice
-        Cache_Keys = list(CacheDataArray.keys())
-        if cmd in Cache_Keys:
-                Cache_Age  = time.time() - CacheTimeArray[cmd]
-        else:
-                Cache_Age  = 0
+	# Computed once, used twice
+	Cache_Keys = list(CacheDataArray.keys())
+	if cmd in Cache_Keys:
+		Cache_Age  = time.time() - CacheTimeArray[cmd]
+	else:
+		Cache_Age  = 0
 
-        Return_Val = "ERROR"
+	Return_Val = "ERROR"
 
-        # If we have valid data cached, return it
-        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                Return_Val = CacheDataArray[cmd]
+	# If we have valid data cached, return it
+	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+		Return_Val = CacheDataArray[cmd]
 
-        # If the cmd is "cat", use fopen/fread/fclose to open it and
-        # cache it as we go
-        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
-                CacheTimeArray[cmd] = time.time()
-                f.close()
-                Return_Val = CacheDataArray[cmd]
+	# If the cmd is "cat", use fopen/fread/fclose to open it and
+	# cache it as we go
+	elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
+		f = open(cmd.split()[1], "r")
+		CacheDataArray[cmd] = f.read()
+		CacheTimeArray[cmd] = time.time()
+		f.close()
+		Return_Val = CacheDataArray[cmd]
 
-        # If we don't have cached data, or it's too old, regenerate it
-        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-                CacheTimeArray[cmd] = time.time()
-                Return_Val = CacheDataArray[cmd]
+	# If we don't have cached data, or it's too old, regenerate it
+	elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+		CacheTimeArray[cmd] = time.time()
+		Return_Val = CacheDataArray[cmd]
 
-        if str(type(Return_Val)) == "<class 'bytes'>":
-                Return_Val = Return_Val.decode("utf-8")
+	if str(type(Return_Val)) == "<class 'bytes'>":
+		Return_Val = Return_Val.decode("utf-8")
 
-        return(Return_Val)
+	return(Return_Val)
 
 
 def List_BlockDevices():
@@ -84,9 +84,18 @@ def List_BlockDevices():
 
 	Block_Devs = [ "/dev/" + s for s in os.listdir("/sys/block")]
 
-	Debug("Block_Devs = " + str(Block_Devs))
+	# Remove unwanted block devices
+	Filtered_Block_Devs = []
+	for i in Block_Devs:
+		# Remove loopback devices
+		if re.search("/dev/loop", i):
+			continue
 
-	return(Block_Devs)
+		Filtered_Block_Devs.append(i)
+
+	Debug("Block_Devs = " + str(Filtered_Block_Devs))
+
+	return(Filtered_Block_Devs)
 
 
 def HumanFriendlyVendor(Vendor, Model):
@@ -104,7 +113,7 @@ def HumanFriendlyVendor(Vendor, Model):
 
 	# Ok, sometimes they like to put the vendor in the model field
 	# so try to fix some of the more egregious ones
-	if Vendor == "ATA" or Vendor == "ATAPI" or Vendor == "UNKNOWN":
+	if Vendor == "ATA" or Vendor == "ATAPI" or Vendor == "UNKNOWN" or Vendor == "unknown":
 
 		if re.search("Hitachi", Model, re.I):
 			Vendor = "Hitachi"
@@ -117,6 +126,9 @@ def HumanFriendlyVendor(Vendor, Model):
 
 		if re.search("MATSHITA", Model, re.I):
 			Vendor = "Matshita"
+
+		if re.search("Samsung", Model, re.I):
+			Vendor = "Samsung"
 
 		if re.search("LITE-ON", Model, re.I):
 			Vendor = "Lite-On"
@@ -132,6 +144,16 @@ def HumanFriendlyVendor(Vendor, Model):
 
 		if Model.startswith("Optiarc"):
 			Vendor = "Optiarc"
+
+	if not Vendor.strip():
+		if re.search("^WD", Model):
+			Vendor = "WDC"
+
+		if re.search("PNY", Model):
+			Vendor = "PNY"
+
+		if re.search("iHAS", Model):
+			Vendor = "LiteOn"
 
 	if re.search("KINGSTON", Model):
 		Vendor = "Kingston"
@@ -160,6 +182,77 @@ def HumanFriendlyVendor(Vendor, Model):
 	return Vendor.strip()
 
 
+def HumanFriendlyModel(Vendor, Model):
+
+	"""
+	Return the Model string for the media
+	Note that this isn't as straightforward as you'd hope because
+	many vendors are quite loose with the standards  This is meant to be
+	human-friendly, and you should always use the raw query instead when
+	trying to match something.
+
+	"""
+
+	# udev likes to use underscores instead of spaces, so change that here.
+	Vendor = re.sub("_", " ", Vendor)
+	Model  = re.sub("_", " ", Model)
+
+	# Ok, sometimes they like to put the vendor in the model field
+	# so try to fix some of the more egregious ones
+	if re.search("Hitachi", Model, re.I):
+		Model = re.sub("Hitachi","", Model).strip()
+		Model = re.sub("HITACHI","", Model).strip()
+
+	if re.search("Fujitsu", Model, re.I):
+		Model = re.sub("Fujitsu","", Model).strip()
+		Model = re.sub("FUJITSU","", Model).strip()
+
+	if re.search("Maxtor", Model, re.I):
+		Model = re.sub("Maxtor","", Model).strip()
+		Model = re.sub("MAXTOR","", Model).strip()
+
+	if re.search("Matshita", Model, re.I):
+		Model = re.sub("Matshita","", Model).strip()
+		Model = re.sub("MATSHITA","", Model).strip()
+
+	if re.search("LITE-ON", Model, re.I):
+		Model = re.sub("Lite-On","", Model).strip()
+		Model = re.sub("LITE-ON","", Model).strip()
+
+	if re.search("KINGSTON", Model):
+		Model = re.sub("KINGSTON ", "", Model)
+
+	if Model.startswith("WDC"):
+		Model = re.sub("^WDC", "", Model).strip()
+
+	if Model.startswith("INTEL"):
+		Model = re.sub("^INTEL", "", Model).strip()
+
+	if Model.startswith("OCZ-"):
+		Model = re.sub("^OCZ-", "", Model).strip()
+
+	if Model.startswith("Optiarc"):
+		Model = re.sub("^Optiarc", "", Model).strip()
+
+	if Vendor.startswith("ST"):
+		Model = Vendor + Model
+
+	if re.search("Samsung", Model, re.I):
+		Model = re.sub("Samsung", "", Model).strip()
+
+	if Model.startswith("TOSHIBA"):
+		Model = re.sub("^TOSHIBA ", "", Model).strip()
+
+	if Vendor.startswith("MAXTOR"):
+		Model = re.sub("^MAXTOR ", "", Vendor + Model).strip()
+
+	if Model.startswith("ATAPI"):
+		Model = re.sub("^ATAPI", "", Model)
+
+	return Model.strip()
+
+
+
 # Blank dictionary to hold parsed output from the "sg_ses" command
 udevadm_dict = {}
 
@@ -178,9 +271,8 @@ keys_whitelist = [
 	"ID_BUS",\
 	"ID_ATA_ROTATION_RATE_RPM",\
 	"ID_SERIAL_SHORT",\
-	"ID_WWN",\
+#	"ID_WWN",\
 	"SCSI_IDENT_PORT_NAA_REG",\
-	"SCSI_IDENT_TARGET_NAA_REG",\
 	"ID_PATH"]
 
 
@@ -199,8 +291,8 @@ for bd in blockdevs:
 		key = line.split("=")[0]
 		val = line.split("=")[1]
 
-		if not key in keys_whitelist:
-			continue
+#		if not key in keys_whitelist:
+#			continue
 
 		Debug("bd " + bd + " key " + key + " val = " + val)
 
@@ -212,23 +304,61 @@ udevadm_dict = {key:udevadm_dict[key] for key in sorted_keys}
 ### Now we want to iterate over and simplify/clarify a few things
 for bd in udevadm_dict:
 
-	if not "ID_BUS"  in udevadm_dict[bd] and re.search("nvme", udevadm_dict[bd]['ID_PATH']):
-		print("DEBUG : " + str(udevadm_dict[bd]))
-		udevadm_dict[bd]['ID_BUS'] = "nvme"
+	# If it doesn't have a SCSI serial #, see if there's a SATA serial # and use that
+	if not "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
+		if "ID_SERIAL_SHORT" in udevadm_dict[bd]:
+			udevadm_dict[bd]['SCSI_IDENT_SERIAL'] = udevadm_dict[bd]['ID_SERIAL_SHORT']
+
+	# Also, if it doesn't have a SCSI firmware revision #, use the SATA firmware revision #
+	if not "SCSI_REVISION" in udevadm_dict[bd]:
+		if "ID_REVISION" in udevadm_dict[bd]:
+			udevadm_dict[bd]['SCSI_REVISION'] = udevadm_dict[bd]['ID_REVISION']
+
+	if not "ID_BUS" in udevadm_dict[bd]:
+		if "ID_PATH" in udevadm_dict[bd]:
+			if re.search("nvme", udevadm_dict[bd]['ID_PATH']):
+				udevadm_dict[bd]['ID_BUS'] = "nvme"
 	else:
 		udevadm_dict[bd]['ID_BUS'] = udevadm_dict[bd]['ID_BUS']
 
-#	udevadm_dict[bd]["SCSI_VENDOR"] = HumanFriendlyVendor(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+	if not "SCSI_VENDOR" in udevadm_dict[bd]:
+		udevadm_dict[bd]["SCSI_VENDOR"] = " "
 
+	udevadm_dict[bd]["SCSI_VENDOR"] = HumanFriendlyVendor(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+	udevadm_dict[bd]["ID_MODEL"]    = HumanFriendlyModel(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+
+	if "ID_BUS" in udevadm_dict[bd]:
+		if udevadm_dict[bd]['ID_BUS'] == "nvme":
+
+			smartctl_output = SysExec("smartctl -i " + bd)
+			for l in smartctl_output.splitlines():
+
+				if re.search("Serial Number:", l):
+					udevadm_dict[bd]['SCSI_IDENT_SERIAL'] = l.split(":")[1].strip()
+
+				if re.search("Firmware Version:", l):
+					udevadm_dict[bd]['SCSI_REVISION'] = l.split(":")[1].strip()
+
+### I need to add a final loop to filter out all entries except the ones in the whitelist
+tmp = {}
+for bd in udevadm_dict:
+	tmp[bd] = {}
+	for key in keys_whitelist:
+		if key in udevadm_dict[bd]:
+			tmp[bd][key] = udevadm_dict[bd][key]
+		else:
+			tmp[bd][key] = ""
+udevadm_dict = tmp
 
 x = PrettyTable(keys_whitelist)
 x.padding_width = 1
+x.align = "l"
 for bd in udevadm_dict:
-	tmp = []
+	tmp2 = []
 	for key in keys_whitelist:
 		if key in udevadm_dict[bd]:
-			tmp.append(udevadm_dict[bd][key])
+			tmp2.append(udevadm_dict[bd][key])
 		else:
-			tmp.append("")
-	x.add_row(tmp)
+			tmp2.append("")
+	x.add_row(tmp2)
 print(x)
