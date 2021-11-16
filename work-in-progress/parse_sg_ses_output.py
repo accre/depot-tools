@@ -219,14 +219,7 @@ for e in enclosures:
 
 # Get the list of column names for PrettyTable
 
-print("DEBUG:  sg_ses_dict = " + str(sg_ses_dict))
-
-print("DEBUG:  len = " + str(len(sg_ses_dict)))
-
-print("DEBUG:  len2 = " + str(len(sg_ses_dict[0].keys())))
-
 col = sg_ses_dict[enclosures[0]][slots[0]].keys()
-
 Debug("col = " + str(col))
 
 x = PrettyTable(col)
