@@ -370,10 +370,13 @@ for bd in udevadm_dict:
 	if "ID_MODEL" in udevadm_dict[bd]:
 		udevadm_dict[bd]["SCSI_VENDOR"] = HumanFriendlyVendor(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
 
-	if "SCSI_VENDOR" in udevadm_dict[bd]:
+	if "SCSI_VENDOR" in udevadm_dict[bd] and "ID_MODEL" in udevadm_dict[bd]:
 		udevadm_dict[bd]["ID_MODEL"]    = HumanFriendlyModel(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
 
-	udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = HumanFriendlySerial(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+	if "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
+		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = HumanFriendlySerial(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
+	else:
+		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = "UNKNOWN"
 
 	if "ID_BUS" in udevadm_dict[bd]:
 		if udevadm_dict[bd]['ID_BUS'] == "nvme":

@@ -124,19 +124,28 @@ def List_Slots(e):
 # Blank dictionary to hold parsed output from the "sg_ses" command
 sg_ses_dict = {}
 
-# Iterate over all enclosures...
+# Get a list of all enclosures
 enclosures = List_Enclosures()
 
+# Some "enclosures" aren't really, so remove them from the list
+tmp_enclosures = []
+for e in enclosures:
+	slots = List_Slots(e)
+	if not slots:
+		continue
+	tmp_enclosures.append(e)
+enclosures = tmp_enclosures
+
 if not enclosures:
-	print("ERROR: No enclosures detected!")
+	print("ERROR: No enclosures detected, or enclosure does not have attached drives.")
 	sys.exit(1)
 
+
+# Iterate over all enclosures...
 for e in enclosures:
 
 	# Blank dictionary for this enclosure
 	sg_ses_dict[e] = {}
-
-	slots = List_Slots(e)
 
 	for s in slots:
 
@@ -209,6 +218,13 @@ for e in enclosures:
 
 
 # Get the list of column names for PrettyTable
+
+print("DEBUG:  sg_ses_dict = " + str(sg_ses_dict))
+
+print("DEBUG:  len = " + str(len(sg_ses_dict)))
+
+print("DEBUG:  len2 = " + str(len(sg_ses_dict[0].keys())))
+
 col = sg_ses_dict[enclosures[0]][slots[0]].keys()
 
 Debug("col = " + str(col))
