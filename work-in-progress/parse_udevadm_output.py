@@ -17,7 +17,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -98,6 +98,10 @@ def List_BlockDevices():
 
 		# Remove RAID devices
 		if re.search("/dev/md", i):
+			continue
+
+		# Remove device mapper devices
+		if re.search("/dev/dm-", i):
 			continue
 
 		Filtered_Block_Devs.append(i)

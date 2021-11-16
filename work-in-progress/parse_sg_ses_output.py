@@ -186,6 +186,9 @@ for e in enclosures:
 		# Parse the "ec" page
 		sg_ses_output = SysExec("sg_ses -p ec --index=" + s + " " + e)
 		sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
+
+		# Right now only print the "ident" column, haven't found much use for the others
+		whitelist = [ "s_ident" ]
 		for line in sg_ses_output.splitlines():
 			line = ' '.join(line.split()).strip()
 
@@ -199,8 +202,17 @@ for e in enclosures:
 				key = "s_" + tmp_line.split("=")[0].strip()
 				val =        tmp_line.split("=")[1].strip()
 
-				if val == "0":
-					val = ""
+				if not key in whitelist:
+					continue
+
+				if key == "s_ident":
+					if val == 1:
+						val = "On"
+					else:
+						val = "Off"
+
+#				if val == "0":
+#					val = ""
 
 				sg_ses_dict[e][s][key] = val
 
