@@ -327,9 +327,6 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 	return Serial
 
 
-# Blank dictionary to hold parsed output from the "sg_ses" command
-sg_ses_dict = {}
-
 # Get a list of all enclosures
 enclosures = List_Enclosures()
 
@@ -342,97 +339,81 @@ for e in enclosures:
 	tmp_enclosures.append(e)
 enclosures = tmp_enclosures
 
-if not enclosures:
-	print("ERROR: No enclosures detected, or enclosure does not have attached drives.")
-	sys.exit(1)
-
 # Iterate over all enclosures...
-for e in enclosures:
 
-	# Blank dictionary for this enclosure
-	sg_ses_dict[e] = {}
+# Blank dictionary to hold parsed output from the "sg_ses" command
+sg_ses_dict = {}
 
-	slots = List_Slots(e)
-	Debug("Slots for Enclosure " + e + " = " + str(slots))
+if enclosures:
+	for e in enclosures:
 
-	for s in slots:
+		# Blank dictionary for this enclosure
+		sg_ses_dict[e] = {}
 
-		sg_ses_dict[e][s] = {}
-		sg_ses_dict[e][s]["enclosure"] = e
-		sg_ses_dict[e][s]["slot"]      = s
+		slots = List_Slots(e)
 
-		# Parse the "aes" page
-		sg_ses_output = SysExec("sg_ses -p aes --index=" + s + " " + e)
-		sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
-		for line in sg_ses_output.splitlines():
-			line = ' '.join(line.split()).strip()
+		for s in slots:
 
-			if re.search("target port for:", line):
-				dev_type = line.split(":")[1].strip()
-				if dev_type == "SSP":
-					sg_ses_dict[e][s]["media_type"] = "SAS"
-				elif dev_type == "SATA_device":
-					sg_ses_dict[e][s]["media_type"] = "SATA"
-				elif dev_type == "":
-					sg_ses_dict[e][s]["media_type"] = "Empty"
-				else:
-					sg_ses_dict[e][s]["media_type"] = "Unknown"
-			if re.search("SAS address:", line) and not re.search("attached SAS address", line):
-					sg_ses_dict[e][s]["media_wwn"] = line.split(":")[1].strip()
+			sg_ses_dict[e][s] = {}
+			sg_ses_dict[e][s]["enclosure"] = e
+			sg_ses_dict[e][s]["slot"]      = s
 
-		# Parse the "ed" page
-		sg_ses_output = SysExec("sg_ses -p ed --index=" + s + " " + e)
-		sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
-		for line in sg_ses_output.splitlines():
-			line = ' '.join(line.split()).strip()
-			if re.search("Element " + str(s) + " descriptor:", line):
-				sg_ses_dict[e][s]["descriptor"] = line.split(":")[1].strip()
+			# Parse the "aes" page
+			sg_ses_output = SysExec("sg_ses -p aes --index=" + s + " " + e)
+			sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
+			for line in sg_ses_output.splitlines():
+				line = ' '.join(line.split()).strip()
 
-		# Parse the "ec" page
-		sg_ses_output = SysExec("sg_ses -p ec --index=" + s + " " + e)
-		sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
-
-		# Right now only print the "ident" column, haven't found much use for the others
-		whitelist = [ "s_ident" ]
-		for line in sg_ses_output.splitlines():
-			line = ' '.join(line.split()).strip()
-
-			# Rather than writing a thousand rules, just parse anything that looks like "foo=bar" as a key/value pair
-			if re.search("=", line):
-
-				tmp_line = line.lower()
-				tmp_line = re.sub("/", "_", tmp_line)
-				tmp_line = re.sub(" ", "_", tmp_line)
-
-				key = "s_" + tmp_line.split("=")[0].strip()
-				val =        tmp_line.split("=")[1].strip()
-
-				if not key in whitelist:
-					continue
-
-				if key == "s_ident":
-					if val == 1:
-						val = "On"
+				if re.search("target port for:", line):
+					dev_type = line.split(":")[1].strip()
+					if dev_type == "SSP":
+						sg_ses_dict[e][s]["media_type"] = "SAS"
+					elif dev_type == "SATA_device":
+						sg_ses_dict[e][s]["media_type"] = "SATA"
+					elif dev_type == "":
+						sg_ses_dict[e][s]["media_type"] = "Empty"
 					else:
-						val = "Off"
+						sg_ses_dict[e][s]["media_type"] = "Unknown"
+				if re.search("SAS address:", line) and not re.search("attached SAS address", line):
+						sg_ses_dict[e][s]["media_wwn"] = line.split(":")[1].strip()
 
-				sg_ses_dict[e][s][key] = val
+			# Parse the "ed" page
+			sg_ses_output = SysExec("sg_ses -p ed --index=" + s + " " + e)
+			sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
+			for line in sg_ses_output.splitlines():
+				line = ' '.join(line.split()).strip()
+				if re.search("Element " + str(s) + " descriptor:", line):
+					sg_ses_dict[e][s]["descriptor"] = line.split(":")[1].strip()
 
-# Get the list of column names for PrettyTable
-col = sg_ses_dict[enclosures[0]][slots[0]].keys()
-Debug("col = " + str(col))
+			# Parse the "ec" page
+			sg_ses_output = SysExec("sg_ses -p ec --index=" + s + " " + e)
+			sg_ses_output = re.sub(",", "\n", sg_ses_output).strip()
 
-x = PrettyTable(col)
-x.padding_width = 1
-for e in sg_ses_dict:
-	for s in sg_ses_dict[e]:
-		vals = sg_ses_dict[e][s].values()
-		Debug("vals = " + str(vals))
-		x.add_row(sg_ses_dict[e][s].values())
-print(x)
+			# Right now only print the "ident" column, haven't found much use for the others
+			whitelist = [ "s_ident" ]
+			for line in sg_ses_output.splitlines():
+				line = ' '.join(line.split()).strip()
 
+				# Rather than writing a thousand rules, just parse anything that looks like "foo=bar" as a key/value pair
+				if re.search("=", line):
 
-####################################################################################################################################
+					tmp_line = line.lower()
+					tmp_line = re.sub("/", "_", tmp_line)
+					tmp_line = re.sub(" ", "_", tmp_line)
+
+					key = "s_" + tmp_line.split("=")[0].strip()
+					val =        tmp_line.split("=")[1].strip()
+
+					if not key in whitelist:
+						continue
+
+					if key == "s_ident":
+						if val == 1:
+							val = "On"
+						else:
+							val = "Off"
+
+					sg_ses_dict[e][s][key] = val
 
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
@@ -458,8 +439,6 @@ keys_whitelist = [
 
 
 for bd in blockdevs:
-
-	Debug("Looping over bd " + bd)
 
 	# Blank dictionary for this enclosure
 	udevadm_dict[bd] = {}
@@ -563,26 +542,50 @@ for bd in udevadm_dict:
 udevadm_dict = tmp
 
 ### Now we have sg_ses_dict and udevadm_dict.  Join them together and print
+for bd in udevadm_dict:
+
+	# This is result on drives attached via SATA, NVME, and other non-enclosure topologies
+	search = "unknown"
+
+	# You can match this directly with sg_ses_dict
+	if "SCSI_IDENT_PORT_NAA_REG" in udevadm_dict[bd]:
+		if re.search("^50", udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]):
+			search = udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]
+
+	elif "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
+		if re.search("^50", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]):
+			# We want to subtract 2 from whatever value is here
+			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
+			search = hex(int(search, 16) - 2)
+
+	if search != "unknown":
+		for e in sg_ses_dict:
+			for s in sg_ses_dict[e]:
+				if sg_ses_dict[e][s]["media_wwn"] == "0x" + search:
+					Debug("bd" + bd + " corresponds to enclosure " + e + " slot " + s)
+					udevadm_dict[bd].update(sg_ses_dict[e][s])
+					break
+	else:
+		null_dict = { "enclosure":  "none",    \
+                              "slot":       "none",    \
+                              "media_type": "unknown", \
+			      "media_wwn":  "unknown", \
+                              "descriptor": "none",    \
+                              "s_ident":    "None"}
+		udevadm_dict[bd].update(null_dict)
 
 
-x = PrettyTable(keys_whitelist)
+print_list = [ "DEVNAME", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "ID_SCSI_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "ID_PATH", "s_ident" ]
+
+x = PrettyTable(print_list)
 x.padding_width = 1
 x.align = "l"
 for bd in udevadm_dict:
 	tmp2 = []
-	for key in keys_whitelist:
+	for key in print_list:
 		if key in udevadm_dict[bd]:
 			tmp2.append(udevadm_dict[bd][key])
 		else:
 			tmp2.append("")
 	x.add_row(tmp2)
 print(x)
-
-
-#sg_ses_dict looks like:
-#| enclosure | slot | media_type |     media_wwn      | descriptor | s_ident |
-#|  /dev/sg0 |  0   |    SAS     | 0x5000c500a6dae405 |  Disk001   |   Off   |
-
-# udevadm_dict looks like:
-#| DEVNAME   | SCSI_VENDOR | ID_MODEL      | SCSI_IDENT_SERIAL  | ID_SCSI_SERIAL       | SCSI_REVISION | ID_BUS | MEDIA_TYPE | SCSI_IDENT_PORT_NAA_REG | ID_PATH                        |
-#| /dev/sdaa | Seagate     | ST12000NM0038 | 5000c500aecd9b4f   | ZHZ4QZ430000C011DR2B | E002          | scsi   | hd         |                         | pci-0000:81:00.0-scsi-0:0:47:0 |
