@@ -270,7 +270,7 @@ keys_whitelist = [
 	"SCSI_REVISION",\
 	"ID_BUS",\
 	"ID_ATA_ROTATION_RATE_RPM",\
-	"ID_SERIAL_SHORT",\
+#	"ID_SERIAL_SHORT",\
 #	"ID_WWN",\
 	"SCSI_IDENT_PORT_NAA_REG",\
 	"ID_PATH"]

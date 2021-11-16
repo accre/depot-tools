@@ -1,1 +1,0 @@
-sg_ses -p all --index=23 /dev/sg24 
