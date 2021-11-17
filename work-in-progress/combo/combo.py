@@ -257,6 +257,12 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
         Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() entry")
 
         Map = {}
+
+        MEGACLI_BIN = Bin_Suggests("MegaCli64")
+        if MEGACLI_BIN is None:
+                print("INFO: The LSI 'MegaCli64' utility was not found.  Mapping drives to enclosure/slot might not work.")
+                return Map
+
         val_wwn = None
         val_sas = None
 
@@ -292,6 +298,8 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
 
                         val_wwn = None
                         val_sas = None
+
+        Debug("def map_intermediate_SAS_to_WWN_with_Megacli():: Map = " + str(Map))
 
         Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() exit")
 
@@ -907,6 +915,13 @@ for bd in udevadm_dict:
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
+
+	if "Falcon" in vars():
+		if udevadm_dict[bd]["ID_BUS"] == "ata":
+			if "ID_WWN" in udevadm_dict[bd]:
+				st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
+				if st in fal_map:
+					search = fal_map[st]
 
 	if "Thunderbolt" in vars():
 		if udevadm_dict[bd]["ID_BUS"] == "ata":
