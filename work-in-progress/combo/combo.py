@@ -775,6 +775,7 @@ keys_whitelist = [
 	"SCSI_VENDOR",\
 	"ID_MODEL",\
 	"SCSI_IDENT_SERIAL",\
+	"ID_SERIAL_SHORT",\
 	"ID_SCSI_SERIAL",\
 	"SCSI_REVISION",\
 	"ID_BUS",\
@@ -918,15 +919,22 @@ for bd in udevadm_dict:
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
 
+	if search == "unknown" and "ID_SERIAL_SHORT" in udevadm_dict[bd]:
+		if re.search("^50", udevadm_dict[bd]["ID_SERIAL_SHORT"]):
+			# We want to subtract 2 from whatever value is here
+			search = udevadm_dict[bd]["ID_SERIAL_SHORT"]
+			search = hex(int(search, 16) - 2)
+			search = re.sub("^0x", "", search)
+
+	# Get WWN map using sas2irc
 	if "Falcon" in vars():
-	#	if udevadm_dict[bd]["ID_BUS"] == "ata":
 		if "ID_WWN" in udevadm_dict[bd]:
 			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
 			if st in fal_map:
 				search = fal_map[st]
 
+	# Get WWN map using MegaCLI
 	if "Thunderbolt" in vars():
-	#	if udevadm_dict[bd]["ID_BUS"] == "ata":
 		if "ID_WWN" in udevadm_dict[bd]:
 			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
 			if st in thu_map:
@@ -937,7 +945,6 @@ for bd in udevadm_dict:
 		for e in sg_ses_dict:
 			for s in sg_ses_dict[e]:
 				if sg_ses_dict[e][s]["media_wwn"] == "0x" + search:
-#					Debug("bd" + bd + " corresponds to enclosure " + e + " slot " + s)
 					udevadm_dict[bd].update(sg_ses_dict[e][s])
 					break
 	else:
