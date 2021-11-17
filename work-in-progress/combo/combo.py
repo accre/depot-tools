@@ -14,7 +14,6 @@ import math
 import time
 
 from subprocess import Popen, PIPE, STDOUT
-from prettytable import PrettyTable
 
 # Enable/disable debugging messages
 Print_Debug = False
@@ -901,7 +900,9 @@ udevadm_dict = tmp
 
 sd_to_sg_map = map_sd_to_sg()
 
-### Now we have sg_ses_dict and udevadm_dict.  Join them together and print
+##############################################################################
+### Join sg_ses_dict to udevadm_dict
+##############################################################################
 for bd in udevadm_dict:
 
 	# This is result on drives attached via SATA, NVME, and other non-enclosure topologies
@@ -968,8 +969,16 @@ for bd in udevadm_dict:
 		udevadm_dict[bd]["slot"]      = "NA"
 		udevadm_dict[bd]["s_ident"]   = "None"
 
-print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
+##############################################################################
+### PrettyPrint the dict and exit
+##############################################################################
 
+# The list of columns we actually want to print
+print_list = [  "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", \
+	        "ID_MODEL", "SCSI_IDENT_SERIAL", "SCSI_REVISION", "ID_BUS", \
+		"MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
+
+# Rename these columns to something human-readible when we print
 pretty_name = {
 	"DEVNAME":           "SD_Dev",   \
 	"SG_DEV":            "SG_Dev",   \
@@ -984,23 +993,57 @@ pretty_name = {
 	"DISK_SIZE":         "Size",     \
 	"s_ident":           "Locate_LED"
 }
+pretty_list = pretty_name.values()
 
-# Pretty versions of the above
-pretty_list =  [ "SD_Dev", "SG_Dev", "Enclosure", "Slot", "Vendor", "Model", "Serial", "Firmware", "Bus", "Media", "Size", "Locate_LED" ]
-
+# Rename columns to their pretty_name equivalents
 for bd in udevadm_dict:
 	for o_key, n_key in pretty_name.items():
 		udevadm_dict[bd][n_key] = udevadm_dict[bd].pop(o_key)
 
-x = PrettyTable(pretty_list)
-x.padding_width = 1
-x.align = "l"
-for bd in udevadm_dict:
-	tmp2 = []
-	for key in pretty_list:
-		if key in udevadm_dict[bd]:
-			tmp2.append(udevadm_dict[bd][key])
-		else:
-			tmp2.append("")
-	x.add_row(tmp2)
-print(x)
+
+# Measure the width of the column titles
+ParamLength = {}
+for bd, dict in udevadm_dict.items():
+	for key, val in dict.items():
+		if not key in pretty_list:
+			continue
+
+		ParamLength[key] = key.__len__()
+
+# Measure the width of the data entries
+for bd, dict in udevadm_dict.items():
+	for key, val in dict.items():
+		if not key in pretty_list:
+			continue
+
+		if isinstance(val, str):
+			ValueLength = val.__len__()
+		elif isinstance(val, int):
+			ValueLength = math.log10(float(t) + 0.001)
+			if ValueLength < 0:
+				ValueLength = 1
+			ValueLength = int(math.floor(ValueLength))
+
+		ParamLength[key] = max(ValueLength, ParamLength[key])
+
+# Create a format statement of the appropriate length
+TOTALLENGTH = 0
+FORMAT=""
+for param in ParamLength:
+	FORMAT = FORMAT + " %-" + str(ParamLength[param] + 2) + "s "
+	TOTALLENGTH = TOTALLENGTH + ParamLength[param] + 4
+TOTALLENGTH = TOTALLENGTH - 2
+
+# Print it and done...
+print("")
+print(FORMAT % tuple(pretty_list))
+print("=" * TOTALLENGTH)
+
+for bd, dict in udevadm_dict.items():
+	printline = []
+	for key, val in dict.items():
+		if not key in pretty_list:
+			continue
+		printline.append(val)
+	print(FORMAT % tuple(printline))
+print("")
