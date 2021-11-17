@@ -365,7 +365,7 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	Base 1024 units = KiB, MiB, GiB, TiB, etc.
 	"""
 
-	Debug("HumanFriendlyBytes:: Called with bytes = " + str(bytes) + ", scale = " + str(scale) + ", decimals = " + str(decimals))
+#	Debug("HumanFriendlyBytes:: Called with bytes = " + str(bytes) + ", scale = " + str(scale) + ", decimals = " + str(decimals))
 
 	AcceptableScales = [ 1000, 1024 ]
 
@@ -710,7 +710,7 @@ for bd in blockdevs:
 		key = line.split("=")[0]
 		val = line.split("=")[1]
 
-		Debug("bd " + bd + " key " + key + " val = " + val)
+		#Debug("bd " + bd + " key " + key + " val = " + val)
 
 		udevadm_dict[bd][key] = val
 
@@ -814,7 +814,7 @@ for bd in udevadm_dict:
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
-# foobar
+
 	if Falcon:
 		if udevadm_dict[bd]["ID_BUS"] == "ata":
 			if "ID_WWN" in udevadm_dict[bd]:
@@ -822,7 +822,8 @@ for bd in udevadm_dict:
 				if st in fal_map:
 					search = fal_map[st]
 
-	if search != "unknown":
+	# If there are no enclosures, there are no backplanes...
+	if search != "unknown" and enclosures:
 		for e in sg_ses_dict:
 			for s in sg_ses_dict[e]:
 				if sg_ses_dict[e][s]["media_wwn"] == "0x" + search:
