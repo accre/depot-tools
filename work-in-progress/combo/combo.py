@@ -212,11 +212,11 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	AcceptableScales = [ 1000, 1024 ]
 
 	if not scale in AcceptableScales:
-		return "ERROR"
+		return "ERR_BAD_SCALE"
 
 	# For removable media like dvd's
 	if bytes == 0:
-		return "EMPTY"
+		return "Empty"
 
 	unit_i = int(math.floor(math.log(bytes, scale)))
 
@@ -228,7 +228,10 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	scaled_units = UNITS[unit_i]
 	scaled_size = round(bytes / math.pow(scale, unit_i), decimals)
 
-	return str(scaled_size) + " " + scaled_units
+	return_str = str(scaled_size) + " " + scaled_units
+	return_str = re.sub(".0 ", " ", return_str)
+
+	return(return_str)
 
 
 def HumanFriendlyVendor(Vendor, Model):
