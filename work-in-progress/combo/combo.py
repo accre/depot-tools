@@ -2,7 +2,7 @@
 
 """
 Parse the output of the "sg_ses" and "udevadm" utilities and print some useful stuff.
-Will eventually be a replacement for "lsblock"
+Will eventually be a replacement for both "lsblock" and "lsslot"
 Dependencies:  lsscsi, python "prettytable" package, smartctl (for nvme drives)
 
 """
@@ -101,14 +101,6 @@ def Bin_Recommends(bin):
 # If a suggested binary isn't available, run anyway
 def Bin_Suggests(bin):
         return which(bin)
-
-LSPCI_BIN = Bin_Requires("lspci")
-LSSCSI_BIN = Bin_Requires("lsscsi")
-SG_SES_BIN = Bin_Recommends("sg_ses")
-UDEVADM_BIN = Bin_Requires("udevadm")
-
-#sas2ircu, smartctl
-
 
 def SysExec(cmd):
 
@@ -258,6 +250,56 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 	return Map
 
+def map_intermediate_SAS_to_WWN_with_MegaCli():
+
+        """
+        Return a map of SAS to WWN using the LSI MegaCLI utility.  This is necessary for cards
+        using our 2nd generation HBA controller ("LSI_Thunderbolt")
+        """
+
+        Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() entry")
+
+        Map = {}
+        val_wwn = None
+        val_sas = None
+
+        output_megacli = SysExec("MegaCli64 -PDList -aALL -NoLog")
+
+        for line in output_megacli.splitlines():
+
+                if not re.search("WWN", line) and not re.search("SAS Address", line):
+                        continue
+
+                if re.search("WWN", line):
+                        val_wwn = line.split(":")[-1].strip().lower()
+
+                elif re.search("SAS Address", line):
+                        SAS = line.split(":")[-1]
+                        val_sas = SAS.split("x")[-1].strip().lower()
+                        # Sometimes there are multiple SAS values.  Ignore ones that are 0
+                        if val_sas == "0":
+                                val_sas = None
+                                continue
+
+                if val_wwn and val_sas:
+
+                        # Extra hacky, but necessary.  This is a guess, but the LSI controller appears to use the
+                        # drives's WWN if it has one, and autogenerates one if it  doesn't.  The former case appears
+                        # to include some of our SAS drives (not SATA drives).  I'm not sure if this is the textbook
+                        # solution, but it works in our case.
+                        if val_sas.startswith("5000c"):
+                                val_wwn = hex(int(val_sas, 16) + 2).split("x")[1].lower()
+
+                        Debug("map_intermediate_SAS_to_WWN_with_MegaCli()::  SAS " + str(val_sas) + " maps to WWN " + str(val_wwn))
+                        Map[val_wwn] = val_sas
+
+                        val_wwn = None
+                        val_sas = None
+
+        Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() exit")
+
+        return Map
+
 
 def List_BlockDevices():
 	"""
@@ -364,8 +406,6 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	Base 1000 units = KB, MB, GB, TB, etc.
 	Base 1024 units = KiB, MiB, GiB, TiB, etc.
 	"""
-
-#	Debug("HumanFriendlyBytes:: Called with bytes = " + str(bytes) + ", scale = " + str(scale) + ", decimals = " + str(decimals))
 
 	AcceptableScales = [ 1000, 1024 ]
 
@@ -566,17 +606,61 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 
 	return Serial
 
+def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
+	"""
+	The HBA/backplane/drive stack seemingly randomly returns either the human-visble
+	serial num on the drive label, or the "05" SATA/SAS serial.   I want to standardize
+	this to the extent possible.   Look at the serial #.   If it starts with "50" or "0x50",
+	call it the "HBA_SERIAL".   Otherwise call it the HR_SERIAL (Human-Readable Serial).
+	This is inherently a "best effort" attempt.
+	"""
+	HR_Serial  = "None"
+	HBA_Serial = "None"
+
+	if SCSI_IDENT_SERIAL == ID_SCSI_SERIAL:
+		if re.search("^500", SCSI_IDENT_SERIAL) or re.search("0x500", SCSI_IDENT_SERIAL):
+			HBA_Serial = SCSI_IDENT_SERIAL
+			HR_Serial = "Unknown"
+		else:
+			HR_Serial = SCSI_IDENT_SERIAL
+			HBA_Serial = "Unknown"
+
+	if re.search("^500", SCSI_IDENT_SERIAL) or re.search("0x500", SCSI_IDENT_SERIAL):
+		HBA_Serial = SCSI_IDENT_SERIAL
+	else:
+		HR_Serial  = SCSI_IDENT_SERIAL
+
+	if re.search("^500", ID_SCSI_SERIAL) or re.search("0x500", ID_SCSI_SERIAL):
+		HBA_Serial = ID_SCSI_SERIAL
+	else:
+		HR_Serial  = ID_SCSI_SERIAL
+
+	return (HR_Serial, HBA_Serial)
+
+
 #####################################################################################
 ### Start of program
 #####################################################################################
-Controller = Get_SASController()
 
+LSPCI_BIN = Bin_Requires("lspci")
+LSSCSI_BIN = Bin_Requires("lsscsi")
+SG_SES_BIN = Bin_Recommends("sg_ses")
+UDEVADM_BIN = Bin_Requires("udevadm")
+
+#sas2ircu (Falcon), MegaCLI (Thunderbolt), and smartctl (NVME drives) are also dependencies
+# need to figure out this case.
+
+Controller = Get_SASController()
 # For Falcon controllers, we need an assist from sas2ircu to map SATA drives to backplane/slot
 for i in Controller:
-	Falcon = False
 	if re.search("Falcon", i):
 		fal_map = map_intermediate_SAS_to_WWN_with_sas2ircu()
 		Falcon = True
+
+	if re.search("Thunderbolt", i):
+		thu_map = map_intermediate_SAS_to_WWN_with_MegaCli()
+		Thunderbolt = True
+
 
 # Get a list of all enclosures
 enclosures = List_Enclosures()
@@ -783,6 +867,15 @@ for bd in udevadm_dict:
 
 				if re.search("Firmware Version:", l):
 					udevadm_dict[bd]['SCSI_REVISION'] = l.split(":")[1].strip()
+	(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["ID_SCSI_SERIAL"]) = standardize_Serial(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["ID_SCSI_SERIAL"])
+
+	# Trim Seagate serial #'s to the first 6 characters
+	if udevadm_dict[bd]["SCSI_VENDOR"] == "Seagate":
+		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = udevadm_dict[bd]["SCSI_IDENT_SERIAL"][0:6]
+
+	# Trim the leading "WD-" on WDC Serial #'s
+	if udevadm_dict[bd]["SCSI_VENDOR"] == "WDC":
+		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = re.sub("^WD-", "", udevadm_dict[bd]["SCSI_IDENT_SERIAL"])
 
 ### I need to add a final loop to filter out all entries except the ones in the whitelist
 tmp = {}
@@ -815,12 +908,12 @@ for bd in udevadm_dict:
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
 
-	if Falcon:
+	if "Thunderbolt" in vars():
 		if udevadm_dict[bd]["ID_BUS"] == "ata":
 			if "ID_WWN" in udevadm_dict[bd]:
 				st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
-				if st in fal_map:
-					search = fal_map[st]
+				if st in thu_map:
+					search = thu_map[st]
 
 	# If there are no enclosures, there are no backplanes...
 	if search != "unknown" and enclosures:

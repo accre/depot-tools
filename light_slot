@@ -33,6 +33,8 @@ def SysExec(cmd):
         Run the given command and return the output
         """
 
+        Debug("SysExec:: cmd = " + cmd)
+
         # Cache the output of the command for 20 seconds
         Cache_Expires = 20
 
@@ -130,7 +132,9 @@ if SAS_Controller == "Unknown":
 	print("ERROR:  Didn't recognize SAS/RAID card.  Quitting...")
 	sys.exit()
 
-if SAS_Controller == "LSI_Invader":
+if SAS_Controller == "LSI_Invader" or SAS_Controller == "LSI_Thunderbolt":
+
+	print("Invader_Thunderbolt path")
 
 	# We have the backplane/slot, so use lsslot to get the dev entry
 	for line in SysExec("lsslot").splitlines():
@@ -227,6 +231,8 @@ if SAS_Controller == "LSI_Invader":
 if SAS_Controller == "LSI_Thunderbolt" or SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
 
 	# It's a good card.  Add any other card which responds normally to sg_ses commands
+
+	print("DEBUG:  Thunderbolt_Falcon_FusionMPT path")
 
 	Backplane = {}
 	SG_Dev = ""

@@ -202,8 +202,8 @@ for e in enclosures:
 				key = "s_" + tmp_line.split("=")[0].strip()
 				val =        tmp_line.split("=")[1].strip()
 
-				if not key in whitelist:
-					continue
+#				if not key in whitelist:
+#					continue
 
 				if key == "s_ident":
 					if val == 1:
@@ -211,8 +211,8 @@ for e in enclosures:
 					else:
 						val = "Off"
 
-#				if val == "0":
-#					val = ""
+				if val == "0":
+					val = ""
 
 				sg_ses_dict[e][s][key] = val
 
