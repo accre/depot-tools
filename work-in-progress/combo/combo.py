@@ -234,7 +234,8 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 			val_wwn = line.split(":")[1]
 			val_wwn = re.sub(" ", "", val_wwn)
 
-		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
+#		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
+
 		if val_device and val_sas and val_wwn:
 			if val_device == "Hard disk":
 				Map[val_wwn] = val_sas
@@ -243,6 +244,7 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 			val_sas       = None
 			val_wwn      = None
 
+	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu(): Map = " + str(Map))
 	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() exit")
 
 	return Map
@@ -917,11 +919,11 @@ for bd in udevadm_dict:
 			search = re.sub("^0x", "", search)
 
 	if "Falcon" in vars():
-		if udevadm_dict[bd]["ID_BUS"] == "ata":
-			if "ID_WWN" in udevadm_dict[bd]:
-				st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
-				if st in fal_map:
-					search = fal_map[st]
+	#	if udevadm_dict[bd]["ID_BUS"] == "ata":
+		if "ID_WWN" in udevadm_dict[bd]:
+			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
+			if st in fal_map:
+				search = fal_map[st]
 
 	if "Thunderbolt" in vars():
 		if udevadm_dict[bd]["ID_BUS"] == "ata":
@@ -935,7 +937,7 @@ for bd in udevadm_dict:
 		for e in sg_ses_dict:
 			for s in sg_ses_dict[e]:
 				if sg_ses_dict[e][s]["media_wwn"] == "0x" + search:
-					Debug("bd" + bd + " corresponds to enclosure " + e + " slot " + s)
+#					Debug("bd" + bd + " corresponds to enclosure " + e + " slot " + s)
 					udevadm_dict[bd].update(sg_ses_dict[e][s])
 					break
 	else:
