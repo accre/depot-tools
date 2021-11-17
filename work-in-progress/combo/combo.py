@@ -17,7 +17,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -183,9 +183,6 @@ def map_sd_to_sg():
 	for line in SysExec("lsscsi -g").splitlines():
 
 		line = re.sub('\s+',' ',line).strip()
-
-		if not re.search("disk", line):
-			continue
 
 		sd_dev = line.split(" ")[-2]
 		sg_dev = line.split(" ")[-1]
@@ -635,6 +632,9 @@ def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
 	else:
 		HR_Serial  = ID_SCSI_SERIAL
 
+	if HR_Serial == "None" or HR_Serial == "Unknown":
+		HR_Serial = HBA_Serial
+
 	return (HR_Serial, HBA_Serial)
 
 
@@ -933,6 +933,7 @@ for bd in udevadm_dict:
 		udevadm_dict[bd].update(null_dict)
 
 	udevadm_dict[bd]["DISK_SIZE"] = HumanFriendlyBytes(findRawSize(bd), 1000, 0)
+	print("DEBUG: bd = " + bd + " and sd_to_sg_map = " + str(sd_to_sg_map))
 	if bd in sd_to_sg_map:
 		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
 	else:
@@ -944,14 +945,37 @@ for bd in udevadm_dict:
 		udevadm_dict[bd]["slot"]      = "NA"
 		udevadm_dict[bd]["s_ident"]   = "None"
 
-print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "ID_SCSI_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
+pretty_name = {
+	"DEVNAME":           "SD_Dev",   \
+	"SG_DEV":            "SG_Dev",   \
+	"enclosure":         "Enclosure",\
+	"slot":              "Slot",     \
+	"SCSI_VENDOR":       "Vendor",   \
+	"ID_MODEL":          "Model",    \
+	"SCSI_IDENT_SERIAL": "Serial",   \
+	"SCSI_REVISION":     "Firmware", \
+	"ID_BUS":            "Bus",      \
+	"MEDIA_TYPE":        "Media",    \
+	"DISK_SIZE":         "Size",     \
+	"s_ident":           "Locate_LED"
+}
 
-x = PrettyTable(print_list)
+# Names of keys we want to print
+print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
+
+# Pretty versions of the above
+pretty_list =  [ "SD_Dev", "SG_Dev", "Enclosure", "Slot", "Vendor", "Model", "Serial", "Firmware", "Bus", "Media", "Size", "Locate_LED" ]
+
+for bd in udevadm_dict:
+	for o_key, n_key in pretty_name.items():
+		udevadm_dict[bd][n_key] = udevadm_dict[bd].pop(o_key)
+
+x = PrettyTable(pretty_list)
 x.padding_width = 1
 x.align = "l"
 for bd in udevadm_dict:
 	tmp2 = []
-	for key in print_list:
+	for key in pretty_list:
 		if key in udevadm_dict[bd]:
 			tmp2.append(udevadm_dict[bd][key])
 		else:
