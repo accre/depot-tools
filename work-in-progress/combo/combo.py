@@ -596,6 +596,7 @@ if not blockdevs:
 
 keys_whitelist = [
 	"DEVNAME",\
+	"ID_VENDOR",\
 	"SCSI_VENDOR",\
 	"ID_MODEL",\
 	"SCSI_IDENT_SERIAL",\
@@ -606,7 +607,6 @@ keys_whitelist = [
 	"MEDIA_TYPE",\
 	"SCSI_IDENT_PORT_NAA_REG",\
 	"ID_PATH"]
-
 
 for bd in blockdevs:
 
@@ -638,6 +638,9 @@ udevadm_dict = {key:udevadm_dict[key] for key in sorted_keys}
 
 ### Now we want to iterate over and simplify/clarify a few things
 for bd in udevadm_dict:
+
+	if "ID_VENDOR" in udevadm_dict[bd] and not "SCSI_VENDOR" in udevadm_dict[bd]:
+		udevadm_dict[bd]["SCSI_VENDOR"] = udevadm_dict[bd]["ID_VENDOR"]
 
 	if "ID_TYPE" in udevadm_dict[bd]:
 		if udevadm_dict[bd]["ID_TYPE"] == "disk":
