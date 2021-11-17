@@ -222,6 +222,10 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 	SAS2IRCU_BIN = Bin_Suggests("sas2ircu")
 
+	if SAS2IRCU_BIN == "None":
+		print("INFO: The LSI 'sas2ircu' utility was not found.  Mapping drives to enclosure/slot disabled.")
+		return Map
+
 	print("DEBUG:  SAS2IRU_BIN = " + SAS2IRCU_BIN)
 	output_sas2ircu = SysExec(SAS2IRCU_BIN + " 0 display")
 
