@@ -77,6 +77,35 @@ def SysExec(cmd):
         return(Return_Val)
 
 
+def Get_SASController():
+
+	"""
+	Return the SAS controller model in this depot.
+	"""
+
+	Debug("def Get_SASController() entry")
+
+	output_lspci = SysExec("lspci")
+
+	# Enumerate all HBA's on-board
+	SAS_Controller = [ ]
+	for line in output_lspci.splitlines():
+		if re.search("RAID bus controller", line) or re.search("Serial Attached SCSI controller", line):
+			SAS_Controller.append(line)
+
+	if not SAS_Controller:
+		SAS_Controller = [ "Unknown" ]
+
+	Debug("Get_SASController()::  SAS Controller type = " + str(SAS_Controller))
+
+	if "Unknown" in SAS_Controller:
+		Debug("Get_SASController()::  There is an unknown controller type in this system.")
+
+	Debug("def Get_SASController() exit")
+
+	return SAS_Controller
+
+
 def map_sd_to_sg():
 	"""
 	Return a map of SD device (/dev/sda) to SG Device (/dev/sg24)
@@ -99,6 +128,54 @@ def map_sd_to_sg():
 	Debug("map_sd_to_sg:: map = " + str(map))
 
 	return(map)
+
+
+def map_intermediate_SAS_to_WWN_with_sas2ircu():
+
+	"""
+	This will return a mapping the intermediate SAS to WWN addreses using sas2ircu which is
+	necessary for the LSI_Falcon HBA controllers.
+	"""
+
+	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() entry")
+
+	Map = {}
+
+	val_device = None
+	val_sas    = None
+	val_wwn    = None
+
+	output_sas2ircu = SysExec("sas2ircu 0 display")
+
+	for line in output_sas2ircu.splitlines():
+
+		if not re.search("Device is a", line) and \
+		   not re.search("SAS Address", line) and \
+		   not re.search("GUID", line):
+			continue
+
+		if re.search("Device is a", line):
+			val_device = re.sub("Device is a ", "", line)
+		elif re.search("SAS Address", line):
+			val_sas = line.split(":")[1]
+			val_sas = re.sub(" ", "", val_sas)
+			val_sas = re.sub("-", "", val_sas).lower()
+		elif re.search("GUID", line):
+			val_wwn = line.split(":")[1]
+			val_wwn = re.sub(" ", "", val_wwn)
+
+		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
+		if val_device and val_sas and val_wwn:
+			if val_device == "Hard disk":
+				Map[val_wwn] = val_sas
+
+			val_device    = None
+			val_sas       = None
+			val_wwn      = None
+
+	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() exit")
+
+	return Map
 
 
 def List_BlockDevices():
@@ -408,6 +485,17 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 
 	return Serial
 
+#####################################################################################
+### Start of program
+#####################################################################################
+Controller = Get_SASController()
+
+# For Falcon controllers, we need an assist from sas2ircu to map SATA drives to backplane/slot
+for i in Controller:
+	Falcon = False
+	if re.search("Falcon", i):
+		fal_map = map_intermediate_SAS_to_WWN_with_sas2ircu()
+		Falcon = True
 
 # Get a list of all enclosures
 enclosures = List_Enclosures()
@@ -514,6 +602,7 @@ keys_whitelist = [
 	"ID_SCSI_SERIAL",\
 	"SCSI_REVISION",\
 	"ID_BUS",\
+	"ID_WWN",\
 	"MEDIA_TYPE",\
 	"SCSI_IDENT_PORT_NAA_REG",\
 	"ID_PATH"]
@@ -641,6 +730,13 @@ for bd in udevadm_dict:
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
+# foobar
+	if Falcon:
+		if udevadm_dict[bd]["ID_BUS"] == "ata":
+			if "ID_WWN" in udevadm_dict[bd]:
+				st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
+				if st in fal_map:
+					search = fal_map[st]
 
 	if search != "unknown":
 		for e in sg_ses_dict:
