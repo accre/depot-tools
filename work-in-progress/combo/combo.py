@@ -33,6 +33,7 @@ def Debug(text):
                 print("DEBUG: " + text)
         return()
 
+
 def which(program):
 
         """
@@ -219,7 +220,9 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 	val_sas    = None
 	val_wwn    = None
 
-	output_sas2ircu = SysExec("sas2ircu 0 display")
+	SAS2IRCU_BIN = Bin_Requires("sas2ircu")
+
+	output_sas2ircu = SysExec(SAS2IRCU_BIN + " 0 display")
 
 	for line in output_sas2ircu.splitlines():
 
