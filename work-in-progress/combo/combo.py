@@ -76,7 +76,7 @@ def SysExec(cmd):
 
         return(Return_Val)
 
-##########################################
+
 def map_sd_to_sg():
 	"""
 	Return a map of SD device (/dev/sda) to SG Device (/dev/sg24)
@@ -99,9 +99,6 @@ def map_sd_to_sg():
 	Debug("map_sd_to_sg:: map = " + str(map))
 
 	return(map)
-
-
-#######################################333
 
 
 def List_BlockDevices():
@@ -210,10 +207,16 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	Base 1024 units = KiB, MiB, GiB, TiB, etc.
 	"""
 
+	Debug("HumanFriendlyBytes:: Called with bytes = " + str(bytes) + ", scale = " + str(scale) + ", decimals = " + str(decimals))
+
 	AcceptableScales = [ 1000, 1024 ]
 
 	if not scale in AcceptableScales:
 		return "ERROR"
+
+	# For removable media like dvd's
+	if bytes == 0:
+		return "EMPTY"
 
 	unit_i = int(math.floor(math.log(bytes, scale)))
 
@@ -484,12 +487,11 @@ if enclosures:
 						continue
 
 					if key == "s_ident":
-						if val == 1:
-							val = "On"
-						else:
-							val = "Off"
+						val_txt = "Off"
+						if int(val) == 1:
+							val_txt = "On"
 
-					sg_ses_dict[e][s][key] = val
+					sg_ses_dict[e][s][key] = val_txt
 
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
@@ -630,11 +632,12 @@ for bd in udevadm_dict:
 		if re.search("^50", udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]):
 			search = udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]
 
-	elif "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
+	if search == "unknown" and "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
 		if re.search("^50", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]):
 			# We want to subtract 2 from whatever value is here
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
 			search = hex(int(search, 16) - 2)
+			search = re.sub("^0x", "", search)
 
 	if search != "unknown":
 		for e in sg_ses_dict:
