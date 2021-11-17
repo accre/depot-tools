@@ -664,6 +664,12 @@ for bd in udevadm_dict:
 	else:
 		udevadm_dict[bd]["SG_DEV"]    = "None"
 
+	if re.search("/dev/nvme", bd):
+		udevadm_dict[bd]["SG_DEV"]    = "None"
+		udevadm_dict[bd]["enclosure"] = "None"
+		udevadm_dict[bd]["slot"]      = "NA"
+		udevadm_dict[bd]["s_ident"]   = "None"
+
 print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "ID_SCSI_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
 
 x = PrettyTable(print_list)
