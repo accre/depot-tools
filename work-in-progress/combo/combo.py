@@ -666,7 +666,7 @@ for i in Controller:
 		fal_map = map_intermediate_SAS_to_WWN_with_sas2ircu()
 		Falcon = True
 
-	if re.search("Thunderbolt", i):
+	if re.search("Thunderbolt", i) or re.search("Invader", i):
 		thu_map = map_intermediate_SAS_to_WWN_with_MegaCli()
 		Thunderbolt = True
 
