@@ -76,6 +76,33 @@ def SysExec(cmd):
 
         return(Return_Val)
 
+##########################################
+def map_sd_to_sg():
+	"""
+	Return a map of SD device (/dev/sda) to SG Device (/dev/sg24)
+	"""
+
+	map = {}
+
+	for line in SysExec("lsscsi -g").splitlines():
+
+		line = re.sub('\s+',' ',line).strip()
+
+		if not re.search("disk", line):
+			continue
+
+		sd_dev = line.split(" ")[-2]
+		sg_dev = line.split(" ")[-1]
+
+		map[sd_dev] = sg_dev
+
+	Debug("map_sd_to_sg:: map = " + str(map))
+
+	return(map)
+
+
+#######################################333
+
 
 def List_BlockDevices():
 	"""
@@ -155,6 +182,52 @@ def List_Slots(e):
 	return(slots)
 
 
+def findRawSize(SD_Device):
+	"""
+	Fetch raw device size (in bytes) by multiplying "/sys/block/DEV/queue/hw_sector_size"
+	by /sys/block/DEV/size
+	"""
+
+	secsize = "0"
+	numsec  = "0"
+
+	tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/size"
+	if os.path.isfile(tfile):
+		numsec = SysExec("cat " + tfile).strip()
+
+	tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/hw_sector_size"
+	if os.path.isfile(tfile):
+		secsize = SysExec("cat " + tfile).strip()
+
+	return int(numsec) * int(secsize)
+
+
+def HumanFriendlyBytes(bytes, scale, decimals):
+
+	"""
+	Convert a integer number of bytes into something legible (10 GB or 25 TiB)
+	Base 1000 units = KB, MB, GB, TB, etc.
+	Base 1024 units = KiB, MiB, GiB, TiB, etc.
+	"""
+
+	AcceptableScales = [ 1000, 1024 ]
+
+	if not scale in AcceptableScales:
+		return "ERROR"
+
+	unit_i = int(math.floor(math.log(bytes, scale)))
+
+	if scale == 1000:
+		UNITS = [ "B",  "KB",  "MB",  "GB",  "TB",  "PB",  "EB",  "ZB",  "YB" ]
+	if scale == 1024:
+		UNITS = [ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB" ]
+
+	scaled_units = UNITS[unit_i]
+	scaled_size = round(bytes / math.pow(scale, unit_i), decimals)
+
+	return str(scaled_size) + " " + scaled_units
+
+
 def HumanFriendlyVendor(Vendor, Model):
 	"""
 	Return the Vendor string for the media (Seagate, Hitachi, etc.)
@@ -201,6 +274,9 @@ def HumanFriendlyVendor(Vendor, Model):
 
 		if re.search("^OCZ", Model):
 			Vendor = "OCZ"
+
+		if re.search("^WD", Model):
+			Vendor = "WDC"
 
 	if re.search("KINGSTON", Model):
 		Vendor = "Kingston"
@@ -541,6 +617,8 @@ for bd in udevadm_dict:
 			tmp[bd][key] = ""
 udevadm_dict = tmp
 
+sd_to_sg_map = map_sd_to_sg()
+
 ### Now we have sg_ses_dict and udevadm_dict.  Join them together and print
 for bd in udevadm_dict:
 
@@ -566,16 +644,21 @@ for bd in udevadm_dict:
 					udevadm_dict[bd].update(sg_ses_dict[e][s])
 					break
 	else:
-		null_dict = { "enclosure":  "none",    \
-                              "slot":       "none",    \
+		null_dict = { "enclosure":  "None",    \
+                              "slot":       "NA",      \
                               "media_type": "unknown", \
 			      "media_wwn":  "unknown", \
                               "descriptor": "none",    \
                               "s_ident":    "None"}
 		udevadm_dict[bd].update(null_dict)
 
+	udevadm_dict[bd]["DISK_SIZE"] = HumanFriendlyBytes(findRawSize(bd), 1000, 0)
+	if bd in sd_to_sg_map:
+		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
+	else:
+		udevadm_dict[bd]["SG_DEV"]    = "None"
 
-print_list = [ "DEVNAME", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "ID_SCSI_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "ID_PATH", "s_ident" ]
+print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "ID_SCSI_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
 
 x = PrettyTable(print_list)
 x.padding_width = 1
