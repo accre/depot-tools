@@ -323,7 +323,7 @@ def List_BlockDevices():
 			continue
 
 		# Remove compressed ramdisks
-		if re.search("/dev/zram", i) or re.search("/dev/ram", i):
+		if re.search("/dev/zram", i):
 			continue
 
 		# Remove RAID devices
