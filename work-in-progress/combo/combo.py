@@ -216,17 +216,16 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 	Map = {}
 
+	SAS2IRCU_BIN = Bin_Suggests("sas2ircu")
+
+	if SAS2IRCU_BIN is None:
+		print("INFO: The LSI 'sas2ircu' utility was not found.  Mapping drives to enclosure/slot will be disabled on Chenbro chassis.")
+		return Map
+
 	val_device = None
 	val_sas    = None
 	val_wwn    = None
 
-	SAS2IRCU_BIN = Bin_Suggests("sas2ircu")
-
-	if SAS2IRCU_BIN == "None":
-		print("INFO: The LSI 'sas2ircu' utility was not found.  Mapping drives to enclosure/slot disabled.")
-		return Map
-
-	print("DEBUG:  SAS2IRU_BIN = " + SAS2IRCU_BIN)
 	output_sas2ircu = SysExec(SAS2IRCU_BIN + " 0 display")
 
 	for line in output_sas2ircu.splitlines():
