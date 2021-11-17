@@ -17,7 +17,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -933,7 +933,6 @@ for bd in udevadm_dict:
 		udevadm_dict[bd].update(null_dict)
 
 	udevadm_dict[bd]["DISK_SIZE"] = HumanFriendlyBytes(findRawSize(bd), 1000, 0)
-	print("DEBUG: bd = " + bd + " and sd_to_sg_map = " + str(sd_to_sg_map))
 	if bd in sd_to_sg_map:
 		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
 	else:
@@ -944,6 +943,8 @@ for bd in udevadm_dict:
 		udevadm_dict[bd]["enclosure"] = "None"
 		udevadm_dict[bd]["slot"]      = "NA"
 		udevadm_dict[bd]["s_ident"]   = "None"
+
+print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
 
 pretty_name = {
 	"DEVNAME":           "SD_Dev",   \
@@ -959,9 +960,6 @@ pretty_name = {
 	"DISK_SIZE":         "Size",     \
 	"s_ident":           "Locate_LED"
 }
-
-# Names of keys we want to print
-print_list = [ "DEVNAME", "SG_DEV", "enclosure", "slot", "SCSI_VENDOR", "ID_MODEL", "SCSI_IDENT_SERIAL", "SCSI_REVISION", "ID_BUS", "MEDIA_TYPE", "DISK_SIZE", "s_ident" ]
 
 # Pretty versions of the above
 pretty_list =  [ "SD_Dev", "SG_Dev", "Enclosure", "Slot", "Vendor", "Model", "Serial", "Firmware", "Bus", "Media", "Size", "Locate_LED" ]
