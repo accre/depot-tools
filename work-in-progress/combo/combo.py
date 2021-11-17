@@ -926,11 +926,11 @@ for bd in udevadm_dict:
 				search = fal_map[st]
 
 	if "Thunderbolt" in vars():
-		if udevadm_dict[bd]["ID_BUS"] == "ata":
-			if "ID_WWN" in udevadm_dict[bd]:
-				st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
-				if st in thu_map:
-					search = thu_map[st]
+	#	if udevadm_dict[bd]["ID_BUS"] == "ata":
+		if "ID_WWN" in udevadm_dict[bd]:
+			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
+			if st in thu_map:
+				search = thu_map[st]
 
 	# If there are no enclosures, there are no backplanes...
 	if search != "unknown" and enclosures:
