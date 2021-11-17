@@ -33,6 +33,81 @@ def Debug(text):
                 print("DEBUG: " + text)
         return()
 
+def which(program):
+
+        """
+
+        Functions similar to the 'which' program in Unix.  Given
+        an executable filename, it will return the whole path to
+        that executable.
+
+        which("ls") should return "/bin/ls"
+
+        Will print an error message and terminate the program if
+        it can't locate the executable in the path.
+
+        """
+
+        def is_exe(fpath):
+                return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+
+        def ext_candidates(fpath):
+                yield fpath
+                for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
+                        yield fpath + ext
+
+        fpath, fname = os.path.split(program)
+
+        if fpath:
+                if is_exe(program):
+                        return program
+        else:
+                for path in os.environ["PATH"].split(os.pathsep):
+                        exe_file = os.path.join(path, program)
+                        for candidate in ext_candidates(exe_file):
+                                if is_exe(candidate):
+                                        return candidate
+
+
+# If a required binary isn't available, quit.
+def Bin_Requires(bin):
+
+	# Because "bin" is required for this script to run, we do a little
+	# extra work trying to find it before giving up.
+
+	if os.path.isfile("/sbin/" + bin):
+		return "/sbin/" + bin
+	elif os.path.isfile("/usr/sbin/" + bin):
+		return  "/usr/sbin/" + bin
+	elif os.path.isfile("/usr/local/sbin/" + bin):
+		return  "/usr/local/sbin/" + bin
+
+	bin_path = which(bin)
+	if not bin_path:
+		print("ERROR: Could not locate " + bin + " in the PATH")
+		sys.exit()
+	return bin_path
+
+# If a recommended binary isn't available, you can still run, but let
+# the user know it would work better if the binary was available
+def Bin_Recommends(bin):
+        bin_path = which(bin)
+        #if not bin_path:
+        #       print("INFO:  This program would run better with " + bin + " in the PATH")
+        return bin_path
+
+
+# If a suggested binary isn't available, run anyway
+def Bin_Suggests(bin):
+        return which(bin)
+
+LSPCI_BIN = Bin_Requires("lspci")
+LSSCSI_BIN = Bin_Requires("lsscsi")
+SG_SES_BIN = Bin_Recommends("sg_ses")
+UDEVADM_BIN = Bin_Requires("udevadm")
+
+#sas2ircu, smartctl
+
 
 def SysExec(cmd):
 
@@ -75,7 +150,6 @@ def SysExec(cmd):
                 Return_Val = Return_Val.decode("utf-8")
 
         return(Return_Val)
-
 
 def Get_SASController():
 
