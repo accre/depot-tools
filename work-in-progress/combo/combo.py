@@ -954,10 +954,17 @@ for bd in udevadm_dict:
 		udevadm_dict[bd].update(null_dict)
 
 	udevadm_dict[bd]["DISK_SIZE"] = HumanFriendlyBytes(findRawSize(bd), 1000, 0)
+
+	# This model lies about its size
+	if udevadm_dict[bd]["ID_MODEL"] == "ST8000NM0065":
+		udevadm_dict[bd]["DISK_SIZE"] = "8 TB"
+
+
 	if bd in sd_to_sg_map:
 		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
 	else:
 		udevadm_dict[bd]["SG_DEV"]    = "None"
+
 
 	if re.search("/dev/nvme", bd):
 		udevadm_dict[bd]["SG_DEV"]    = "None"
