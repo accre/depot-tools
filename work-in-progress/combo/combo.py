@@ -291,7 +291,7 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
                         # drives's WWN if it has one, and autogenerates one if it  doesn't.  The former case appears
                         # to include some of our SAS drives (not SATA drives).  I'm not sure if this is the textbook
                         # solution, but it works in our case.
-                        if val_sas.startswith("5000c"):
+                        if val_sas.startswith("5"):
                                 val_wwn = hex(int(val_sas, 16) + 2).split("x")[1].lower()
 
                         Debug("map_intermediate_SAS_to_WWN_with_MegaCli()::  SAS " + str(val_sas) + " maps to WWN " + str(val_wwn))
@@ -616,7 +616,7 @@ def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
 	"""
 	The HBA/backplane/drive stack seemingly randomly returns either the human-visble
 	serial num on the drive label, or the "05" SATA/SAS serial.   I want to standardize
-	this to the extent possible.   Look at the serial #.   If it starts with "50" or "0x50",
+	this to the extent possible.   Look at the serial #.   If it starts with "5" or "0x5",
 	call it the "HBA_SERIAL".   Otherwise call it the HR_SERIAL (Human-Readable Serial).
 	This is inherently a "best effort" attempt.
 	"""
@@ -624,19 +624,19 @@ def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
 	HBA_Serial = "None"
 
 	if SCSI_IDENT_SERIAL == ID_SCSI_SERIAL:
-		if re.search("^500", SCSI_IDENT_SERIAL) or re.search("0x500", SCSI_IDENT_SERIAL):
+		if re.search("^5", SCSI_IDENT_SERIAL) or re.search("0x5", SCSI_IDENT_SERIAL):
 			HBA_Serial = SCSI_IDENT_SERIAL
 			HR_Serial = "Unknown"
 		else:
 			HR_Serial = SCSI_IDENT_SERIAL
 			HBA_Serial = "Unknown"
 
-	if re.search("^500", SCSI_IDENT_SERIAL) or re.search("0x500", SCSI_IDENT_SERIAL):
+	if re.search("^5", SCSI_IDENT_SERIAL) or re.search("0x5", SCSI_IDENT_SERIAL):
 		HBA_Serial = SCSI_IDENT_SERIAL
 	else:
 		HR_Serial  = SCSI_IDENT_SERIAL
 
-	if re.search("^500", ID_SCSI_SERIAL) or re.search("0x500", ID_SCSI_SERIAL):
+	if re.search("^5", ID_SCSI_SERIAL) or re.search("0x5", ID_SCSI_SERIAL):
 		HBA_Serial = ID_SCSI_SERIAL
 	else:
 		HR_Serial  = ID_SCSI_SERIAL
@@ -790,9 +790,9 @@ for bd in blockdevs:
 	rotation = int(SysExec("cat /sys/block/" + bd.split("/")[2] + "/queue/rotational"))
 
 	if rotation == 0:
-		udevadm_dict[bd]["MEDIA_TYPE"] = "ssd"
+		udevadm_dict[bd]["MEDIA_TYPE"] = "SSD"
 	else:
-		udevadm_dict[bd]["MEDIA_TYPE"] = "hd"
+		udevadm_dict[bd]["MEDIA_TYPE"] = "HD"
 
 	# Parse "udevadm" output
 	udevadm_output = SysExec("udevadm info --query=property --name=" + bd)
@@ -844,9 +844,14 @@ for bd in udevadm_dict:
 	if not "ID_BUS" in udevadm_dict[bd]:
 		if "ID_PATH" in udevadm_dict[bd]:
 			if re.search("nvme", udevadm_dict[bd]['ID_PATH']):
-				udevadm_dict[bd]['ID_BUS'] = "nvme"
+				udevadm_dict[bd]['ID_BUS'] = "NVME"
 	else:
-		udevadm_dict[bd]['ID_BUS'] = udevadm_dict[bd]['ID_BUS']
+		if udevadm_dict[bd]['ID_BUS'] == "scsi":
+			udevadm_dict[bd]['ID_BUS'] =  "SAS"
+		elif udevadm_dict[bd]['ID_BUS'] == "ata":
+			udevadm_dict[bd]['ID_BUS'] = "SATA"
+		else:
+			udevadm_dict[bd]['ID_BUS'] = udevadm_dict[bd]['ID_BUS'].upper()
 
 	if not "SCSI_VENDOR" in udevadm_dict[bd]:
 		udevadm_dict[bd]["SCSI_VENDOR"] = " "
@@ -906,18 +911,18 @@ for bd in udevadm_dict:
 
 	# Find the search term to match with the sg_ses_dict
 	if "SCSI_IDENT_PORT_NAA_REG" in udevadm_dict[bd]:
-		if re.search("^50", udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]):
+		if re.search("^5", udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]):
 			search = udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]
 
 	if search == "unknown" and "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
-		if re.search("^50", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]):
+		if re.search("^5", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]):
 			# We want to subtract 2 from whatever value is here
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
 
 	if search == "unknown" and "ID_SERIAL_SHORT" in udevadm_dict[bd]:
-		if re.search("^50", udevadm_dict[bd]["ID_SERIAL_SHORT"]):
+		if re.search("^5", udevadm_dict[bd]["ID_SERIAL_SHORT"]):
 			# We want to subtract 2 from whatever value is here
 			search = udevadm_dict[bd]["ID_SERIAL_SHORT"]
 			search = hex(int(search, 16) - 2)

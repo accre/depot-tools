@@ -9,12 +9,35 @@ lsblock=$(mktemp)
 lsslot  > "${lsslot}"
 lsblock > "${lsblock}"
 
+rm -f /tmp/sfs_smartctl_*
+for drive in $(grep "disk" "${lsblock}" | awk '{ print $1 }' | cut -d "/" -f 3)
+do
+	smartctl -a /dev/${drive} > /tmp/sfs_smartctl_${drive} &
+done
+# Wait for background smartctl's to complete
+running=$(jobs | grep -c Running)
+while [ "${running}" -ne "0" ]
+do
+	sleep 1
+	running=$(jobs | grep -c Running)
+done
+
 grep "disk" < "${lsblock}" | awk '{ print $1 }' | while IFS= read -r dev
 do
 
-#	echo "$(date) - Scanning ${dev}..."
+	dev_small=$(echo ${dev} | cut -d "/" -f 3)
 
-	sudo smartctl -a "${dev}" | sudo tee "${smart}" > /dev/null
+#	TIME_START=$(date +%s)
+
+#	echo -n "$(date) - Scanning ${dev}... - "
+
+#	DBG_TIME_START=$(date +%s)
+#	echo -n "	Running smartctl on ${dev}..."
+#	sudo smartctl -a "${dev}" | sudo tee "/tmp/sfs_smartctl_${dev_small}" > /dev/null
+#	DBG_TIME_END=$(date +%s)
+#	DBG_TIME_DIFF=$((DBG_TIME_END - DBG_TIME_START))
+#	echo -n " ${DBG_TIME_DIFF} secs elapsed for SMART, "
+
 
 	# Determine if it's a ssd or hard drive
 	disk_type=$(grep " ${dev} " "${lsblock}" | tr " " "\n" | grep "disk:" | cut -d ":" -f 2)
@@ -66,14 +89,14 @@ do
 	esac
 
 	### Check for major drive failure
-	Health=$(grep "SMART Health Status" "${smart}" | cut -d ":" -f 2- | grep -v " OK$")
+	Health=$(grep "SMART Health Status" "/tmp/sfs_smartctl_${dev_small}" | cut -d ":" -f 2- | grep -v " OK$")
 	if [ ! -z "${Health}" ]; then
 			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is urgently failing!  ${Health}\n" "${dev}"
 	fi
 
 	# Assume drives are SATA by default, since most are...
 	SAS=0
-	SAS_QUERY=$(grep -i "Transport protocol:" "${smart}" | grep -c SAS)
+	SAS_QUERY=$(grep -i "Transport protocol:" "/tmp/sfs_smartctl_${dev_small}" | grep -c SAS)
 	[ "${SAS_QUERY}" -eq "1" ] && SAS=1
 
 	if [ "${SAS}" == 0 ]; then
@@ -82,10 +105,10 @@ do
 		IGNORE_THESE_ATTRIBUTES="High_Fly_Writes|Load_Cycle_Count"
 
 		# Fetch info on the remaining SMART attributes...
-		grep -E "(Old_age|Pre-fail)" "${smart}" | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | grep -Ev "(${IGNORE_THESE_ATTRIBUTES}|Not_testing)" > "${attr}"
+		grep -E "(Old_age|Pre-fail)" "/tmp/sfs_smartctl_${dev_small}" | sed "s/^ *//" | grep "^[1-9]" | awk '{ print $1,$2,$4,$5,$6,$10 }' | grep -Ev "(${IGNORE_THESE_ATTRIBUTES}|Not_testing)" > "${attr}"
 
 		# Fetch the SMART self-test execution status
-		status=$(grep -A 5 "Self-test execution status" "${smart}" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/")
+		status=$(grep -A 5 "Self-test execution status" "/tmp/sfs_smartctl_${dev_small}" | grep -B 5 "Total time to complete Offline" | grep -v "Total time to complete Offline" | tr "\n" " " | tr "\t" " " | sed "s/  */ /g" | sed "s/( /(/")
 
 		if [[ "${status}" =~ "The previous self-test completed having the read element of the test failed" ]]; then
 			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing a read-element test\n" "${dev}"
@@ -147,7 +170,7 @@ do
 	else
 
 		# Assume drive is SAS
-		Defects=$(cat "${smart}" | grep "Elements in grown defect list" | cut -d ":" -f 2 | awk '{ print $1 }')
+		Defects=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "Elements in grown defect list" | cut -d ":" -f 2 | awk '{ print $1 }')
 		[ -z "${Defects}" ] && Defects=0
 
 		# Don't even both printing it if it's just one or two defects
@@ -162,43 +185,44 @@ do
 
 # Disable this for general testing, but uncomment if you're trying to 
 # find depots with bad HBA's or cabling
-#		NonMedium=$(cat "${smart}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
+#		NonMedium=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
 #		[ -z "${NonMedium}" ] && NonMedium="0"
 
 #		if [ "${NonMedium}" -gt "0" ]; then
 #			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of Non-medium errors (${NonMedium})\n" "${dev}"
 #		fi
 
-		smart_failing=$(cat "${smart}" | grep -i "A mandatory SMART command failed" | wc -l)
+		smart_failing=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep -i "A mandatory SMART command failed" | wc -l)
 
 		if [ "${smart_failing}" -gt "0" ]; then
 			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} is failing mandatory SMART commands\n" "${dev}"
 		fi
 
-		total_read_uncorrected_errors=$(cat "${smart}" | grep "^read:" | rev | cut -d " " -f 1 | rev)
+		total_read_uncorrected_errors=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^read:" | rev | cut -d " " -f 1 | rev)
 		[ -z "${total_read_uncorrected_errors}" ] && total_read_uncorrected_errors=0
 		[ "${total_read_uncorrected_errors}" -gt 10 ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total read uncorrected errors greater than 10 (${total_read_uncorrected_errors})\n" "${dev}"
 
-		total_write_uncorrected_errors=$(cat "${smart}" | grep "^write:" | rev | cut -d " " -f 1 | rev)
+		total_write_uncorrected_errors=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^write:" | rev | cut -d " " -f 1 | rev)
 		[ -z "${total_write_uncorrected_errors}" ] && total_write_uncorrected_errors=0
 		[ "${total_write_uncorrected_errors}" -gt 10 ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total write uncorrected errors greater than 10 (${total_write_uncorrected_errors})\n" "${dev}"
 
-#		read_correction_algorithm_invocations=$(cat "${smart}" | grep "^read:" | rev | awk '{ print $3 }' | rev)
+#		read_correction_algorithm_invocations=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^read:" | rev | awk '{ print $3 }' | rev)
 #		[ -z "${read_correction_algorithm_invocations}" ] && read_correction_algorithm_invocations=0
 #		[ "${read_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has read correction algorithm invocations greater than 10 (${read_correction_algorithm_invocations})\n" "${dev}"
 
-#		write_correction_algorithm_invocations=$(cat "${smart}" | egrep "^write:" | rev | awk '{ print $3 }' | rev)
+#		write_correction_algorithm_invocations=$(cat "/tmp/sfs_smartctl_${dev_small}" | egrep "^write:" | rev | awk '{ print $3 }' | rev)
 #		[ -z "${write_correction_algorithm_invocations}" ] && write_correction_algorithm_invocations=0
 #		[ "${write_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has write correction algorithm invocations greater than 10 (${write_correction_algorithm_invocations})\n" "${dev}"
 
-		smart_test_segment_failure=$(cat "${smart}" | grep "Failed in segment" | wc -l)
+		smart_test_segment_failure=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "Failed in segment" | wc -l)
 		[ -z "${smart_test_segment_failure}" ] && smart_test_segment_failure=0
 		[ "${smart_test_segment_failure}" -gt "0" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has SMART test failed in segment errors (${smart_test_segment_failure})\n" "${dev}"
 
-
-
+#	TIME_END=$(date +%s)
+#	TIME_DIFF=$((TIME_END - TIME_START))
+#	echo " ${TIME_DIFF} secs"
 
 	fi
 done
 
-rm -f "${attr}" "${lsslot}" "${lsblock}" "${smart}"
+rm -f "${attr}" "${lsslot}" "${lsblock}" "/tmp/sfs_smartctl_*"
