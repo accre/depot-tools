@@ -425,10 +425,14 @@ def Get_IBP_Server_Version():
                 build_date = re.sub("CMake Build Date: ", "", line).strip()
     else:
         string_file = "UNKNOWN"
+        if os.path.exists("/usr/bin/ibp_server"):
+            string_file = "/usr/bin/ibp_server"
         if os.path.exists("/usr/local/bin/ibp_server.exe"):
             string_file = "/usr/local/bin/ibp_server.exe"
         if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.0"):
             string_file = "/usr/lib/x86_64-linux-gnu/libibp.so.0"
+        if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.1"):
+            string_file = "/usr/lib/x86_64-linux-gnu/libibp.so.1"
         if string_file == "UNKNOWN":
             print("ERROR:  Can't find string_file, dying")
             sys.exit(1)
