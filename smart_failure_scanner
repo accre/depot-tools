@@ -84,6 +84,8 @@ do
 			HD_Capacity="8 TB" ;;
 		64012505776128)
 			HD_Capacity="8 TB" ;;
+ 		10000831348736)
+ 			HD_Capacity="10 TB" ;;
 		12000138625024)
 			HD_Capacity="12 TB" ;;
 	esac
@@ -174,7 +176,7 @@ do
 		[ -z "${Defects}" ] && Defects=0
 
 		# Don't even both printing it if it's just one or two defects
-		if [ "${Defects}" -gt "2" ]; then
+		if [ "${Defects}" -gt "0" ]; then
 
 			if [ "${Defects}" -gt "50" ]; then
 				printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a critically-high number of defects (${Defects} defects)\n" "${dev}"
@@ -185,12 +187,12 @@ do
 
 # Disable this for general testing, but uncomment if you're trying to 
 # find depots with bad HBA's or cabling
-#		NonMedium=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
-#		[ -z "${NonMedium}" ] && NonMedium="0"
+		NonMedium=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^Non-medium error count:" | cut -d ":" -f 2 | awk '{ print $1 }')
+		[ -z "${NonMedium}" ] && NonMedium="0"
 
-#		if [ "${NonMedium}" -gt "0" ]; then
-#			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of Non-medium errors (${NonMedium})\n" "${dev}"
-#		fi
+		if [ "${NonMedium}" -gt "0" ]; then
+			printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has a non-zero number of Non-medium errors (${NonMedium})\n" "${dev}"
+		fi
 
 		smart_failing=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep -i "A mandatory SMART command failed" | wc -l)
 
@@ -206,13 +208,13 @@ do
 		[ -z "${total_write_uncorrected_errors}" ] && total_write_uncorrected_errors=0
 		[ "${total_write_uncorrected_errors}" -gt 10 ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has total write uncorrected errors greater than 10 (${total_write_uncorrected_errors})\n" "${dev}"
 
-#		read_correction_algorithm_invocations=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^read:" | rev | awk '{ print $3 }' | rev)
-#		[ -z "${read_correction_algorithm_invocations}" ] && read_correction_algorithm_invocations=0
-#		[ "${read_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has read correction algorithm invocations greater than 10 (${read_correction_algorithm_invocations})\n" "${dev}"
+		read_correction_algorithm_invocations=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "^read:" | rev | awk '{ print $3 }' | rev)
+		[ -z "${read_correction_algorithm_invocations}" ] && read_correction_algorithm_invocations=0
+		[ "${read_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has read correction algorithm invocations greater than 10 (${read_correction_algorithm_invocations})\n" "${dev}"
 
-#		write_correction_algorithm_invocations=$(cat "/tmp/sfs_smartctl_${dev_small}" | egrep "^write:" | rev | awk '{ print $3 }' | rev)
-#		[ -z "${write_correction_algorithm_invocations}" ] && write_correction_algorithm_invocations=0
-#		[ "${write_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has write correction algorithm invocations greater than 10 (${write_correction_algorithm_invocations})\n" "${dev}"
+		write_correction_algorithm_invocations=$(cat "/tmp/sfs_smartctl_${dev_small}" | egrep "^write:" | rev | awk '{ print $3 }' | rev)
+		[ -z "${write_correction_algorithm_invocations}" ] && write_correction_algorithm_invocations=0
+		[ "${write_correction_algorithm_invocations}" -gt "10" ] && printf "Dev %-9s Rid ${rid} ${disk_type} ${HD_Vendor} ${HD_Model} ${HD_Capacity} has write correction algorithm invocations greater than 10 (${write_correction_algorithm_invocations})\n" "${dev}"
 
 		smart_test_segment_failure=$(cat "/tmp/sfs_smartctl_${dev_small}" | grep "Failed in segment" | wc -l)
 		[ -z "${smart_test_segment_failure}" ] && smart_test_segment_failure=0
