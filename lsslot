@@ -24,7 +24,7 @@ CacheTimeArray = {}
 Output = []
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 def Debug(text):
 
@@ -457,21 +457,18 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 	Remap_SAS_to_Dev = {}
 
-#	if SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
-#		Debug("Taking path 1...")
-#
-#		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
-#
-#		Debug("Remap_SAS_to_WWN  = " + str(Remap_SAS_to_WWN))
-#
-#		for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
-#
-#			if This_WWN in SAS_to_Dev:
-#				This_Dev = SAS_to_Dev[This_WWN]
-#			else:
-#				This_Dev = "Empty_Slot"
-#
-#			Remap_SAS_to_Dev[This_SAS] = This_Dev
+	if SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
+
+		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
+
+		for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
+
+			if This_WWN in SAS_to_Dev:
+				This_Dev = SAS_to_Dev[This_WWN]
+			else:
+				This_Dev = "Empty_Slot"
+
+			Remap_SAS_to_Dev[This_SAS] = This_Dev
 
 
 	if SAS_Controller == "LSI_Thunderbolt":
@@ -489,7 +486,6 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 
 	if SAS_Controller == "LSI_Invader" or SAS_Controller == "LSI_FusionMPT":
-		Debug("Taking path 2...")
 
 		# On cms-depot18 it appears to need intermediate info too... :-|
 		if socket.gethostname() == "cms-depot18.vampire":

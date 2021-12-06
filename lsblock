@@ -821,6 +821,9 @@ def HumanFriendlyVendor(Vendor, Model):
         # so try to fix some of the more egregious ones
         if Vendor == "ATA" or Vendor == "ATAPI" or Vendor == "UNKNOWN":
 
+                if re.search("Samsung", Model, re.I):
+                        Vendor = "Samsung"
+
                 if re.search("Hitachi", Model, re.I):
                         Vendor = "Hitachi"
 
