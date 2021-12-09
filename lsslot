@@ -24,7 +24,7 @@ CacheTimeArray = {}
 Output = []
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 def Debug(text):
 
