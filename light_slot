@@ -185,7 +185,7 @@ if SAS_Controller == "LSI_Thunderbolt": # or SAS_Controller == "LSI_Invader":
 
 	for bp, keyvals in Backplanes_List.items():
 		for key, val  in Backplanes_List[bp].items():
-			if sys.argv[1] == val:
+			if re.search(sys.argv[1], val, re.IGNORECASE):
 				enclosure = Backplanes_List[bp]['Bus'].split(":")[2]
 				break
 
@@ -208,7 +208,7 @@ elif SAS_Controller == "LSI_Invader":
 
 	for bp, keyvals in Backplanes_List.items():
 		for key, val  in Backplanes_List[bp].items():
-			if sys.argv[1] == val:
+			if re.search(sys.argv[1], val, re.IGNORECASE):
 				enclosure = Backplanes_List[bp]['Bus'].split(":")[2]
 				break
 
