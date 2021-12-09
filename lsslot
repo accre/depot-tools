@@ -200,6 +200,8 @@ def GetLocateLEDState(This_Backplane, This_Slot):
 	# I omit the entry/exit debugs as this function is near bulletproof and gets
 	# called several zillion times, which interferes with actual debugging.
 
+#	Debug("deg GetLocateLEDState():: This_Backplane = " + str(This_Backplane) + " and This_Slot = " + str(This_Slot))
+
 	This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
 
 	LedState_Descr = "Unknown"
@@ -209,12 +211,6 @@ def GetLocateLEDState(This_Backplane, This_Slot):
 		LedState_Descr = "Off"
 
 #	Debug("GetLocateLEDState(): Backplane " + Backplane + " Slot " + str(i) + " is set to " + LedState_Descr)
-
-# 	This may not work on some depots. :-/   You may have to try another led target like "fault" on
-#	a per-HBA/per-backplane basis, or you might need to use MegaCLI for some depots, ala:
-#
-#	MegaCli -AdpSetProp \{UseDiskActivityforLocate -1\}  -aALL    # might be optional on some drives / enclosures
-#	MegaCli -PdLocate -start -physdrv\[E:S\]  -aALL
 
 	return LedState_Descr
 
@@ -525,9 +521,6 @@ def map_Backplane_Slot_to_Dev(AllBackplanes):
 
 	Backplane_Slot_to_SAS = map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes)
 
-	# Adjust this for any HBA-dependent stuff (shift-by-two, intermediate SAS->WWN)
-	SAS_Controller = Get_SASController()
-
 	SAS_to_Dev = fudge_SAS_to_Dev_map(map_SAS_to_Dev(), SAS_Controller)
 
 	for This_Backplane in AllBackplanes:
@@ -568,6 +561,9 @@ def map_Backplane_Slot_to_Dev(AllBackplanes):
 #############################################################################
 # Main Loop
 #############################################################################
+
+# Adjust this for any HBA-dependent stuff (shift-by-two, intermediate SAS->WWN)
+SAS_Controller = Get_SASController()
 
 Foo = Get_ChassisBackplane()
 
