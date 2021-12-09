@@ -24,7 +24,7 @@ CacheTimeArray = {}
 Output = []
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 def Debug(text):
 
@@ -453,7 +453,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 
 	Remap_SAS_to_Dev = {}
 
-	if SAS_Controller == "LSI_Falcon" or SAS_Controller == "LSI_FusionMPT":
+	if SAS_Controller == "LSI_Falcon":
 
 		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
 
