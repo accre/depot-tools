@@ -880,9 +880,9 @@ for bd in udevadm_dict:
 					udevadm_dict[bd]['SCSI_REVISION'] = l.split(":")[1].strip()
 	(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["ID_SCSI_SERIAL"]) = standardize_Serial(udevadm_dict[bd]["SCSI_IDENT_SERIAL"], udevadm_dict[bd]["ID_SCSI_SERIAL"])
 
-	# Trim Seagate serial #'s to the first 6 characters
+	# Trim Seagate serial #'s to the first 8 characters
 	if udevadm_dict[bd]["SCSI_VENDOR"] == "Seagate":
-		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = udevadm_dict[bd]["SCSI_IDENT_SERIAL"][0:6]
+		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = udevadm_dict[bd]["SCSI_IDENT_SERIAL"][0:8]
 
 	# Trim the leading "WD-" on WDC Serial #'s
 	if udevadm_dict[bd]["SCSI_VENDOR"] == "WDC":
