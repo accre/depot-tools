@@ -172,6 +172,64 @@ def Get_SASController():
 	return SAS_Controller
 
 
+def Get_Enclosure_Info():
+
+        """
+        Get info on all enclosures.
+        """
+
+        # Our current depots have 24 slots on the Front backplane and 12 on the Rear
+        # In a more complex setup, we might need a more cumbersome way to alias backplanes
+        Alias_by_NumSlots = {}
+        Alias_by_NumSlots["24"] = "Front"
+        Alias_by_NumSlots["12"] = "Back"
+
+        # Array to hold the output for pretty printing
+        Output = []
+
+        Enclosure_Raw = SysExec("lsscsi -g")
+        for line in Enclosure_Raw.splitlines():
+
+                if not re.search("enclosu", line):
+                        continue
+
+                if re.search("VirtualSES", line):
+                        continue
+
+                Debug("line = " + line)
+
+                SG_Dev = line.split()[-1]
+
+                SG_Bus = line.split()[0]
+                SG_Bus = re.sub("\[", "", SG_Bus)
+                SG_Bus = re.sub("\]", "", SG_Bus)
+
+                SAS_Addr = "UNKNOWN_SAS"
+                SAS_Addr_Raw = SysExec("sg_ses --page=aes " + SG_Dev)
+                for text in SAS_Addr_Raw.splitlines():
+                        if re.search("Primary enclosure logical identifier", text):
+                                SAS_Addr = text.split(":")[1]
+                                SAS_Addr = re.sub(" ", "", SAS_Addr)
+
+                Num_Slots = "UNKNOWN_SLOTS"
+                Num_Slots_Raw  = SysExec("sg_ses --page=cf " + SG_Dev)
+                match = re.search(r'Array device slot(.*)ArrayDevicesInSubEnclsr0', Num_Slots_Raw, re.DOTALL)
+                match = match.group(0)
+                for l in match.splitlines():
+                        if re.search("number of possible elements", l):
+                                Num_Slots = l.split(":")[-1]
+                                Num_Slots = re.sub(" ", "", Num_Slots)
+
+
+                Alias = "UNKNOWN_ALIAS"
+                if Num_Slots in Alias_by_NumSlots:
+                        Alias = Alias_by_NumSlots[Num_Slots]
+
+                Output.append([SG_Dev, Num_Slots, SG_Bus, SAS_Addr, Alias])
+
+        return(Output)
+
+
 def map_sd_to_sg():
 	"""
 	Return a map of SD device (/dev/sda) to SG Device (/dev/sg24)
@@ -339,29 +397,6 @@ def List_BlockDevices():
 	Debug("Block_Devs = " + str(Filtered_Block_Devs))
 
 	return(Filtered_Block_Devs)
-
-
-def List_Enclosures():
-	"""
-        List the available enclosures on this server
-	"""
-
-	enclosures_list_cmd = SysExec("lsscsi -g")
-	enclosures = []
-	for line in enclosures_list_cmd.splitlines():
-
-		line = line.strip()
-
-		if not re.search("enclosu", line):
-			continue
-		if re.search("VirtualSES", line):
-			continue
-
-		enclosures.append(line.split(" ")[-1])
-
-	Debug("List_Enclosures:: enclosures = " + str(enclosures))
-
-	return(enclosures)
 
 
 def List_Slots(e):
@@ -670,24 +705,21 @@ for i in Controller:
 		thu_map = map_intermediate_SAS_to_WWN_with_MegaCli()
 		Thunderbolt = True
 
-# Get a list of all enclosures
-enclosures = List_Enclosures()
-
-# Some "enclosures" aren't really, so remove them from the list
-tmp_enclosures = []
-for e in enclosures:
-	slots = List_Slots(e)
-	if not slots:
-		continue
-	tmp_enclosures.append(e)
-enclosures = tmp_enclosures
+enclosures = Get_Enclosure_Info()
+Debug("enclosures = " + str(enclosures))
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
 sg_ses_dict = {}
 
 # Iterate over all enclosures...
 if enclosures:
-	for e in enclosures:
+
+	for i in enclosures:
+		e         = i[0] # "/dev/sg13"
+		num_slots = i[1] # "12"
+		sg_bus    = i[2] # "0:0:12:0"
+		sg_wwn    = i[3] # "50015b21401add7f"
+		alias     = i[4] # "Front"
 
 		# Blank dictionary for this enclosure
 		sg_ses_dict[e] = {}
