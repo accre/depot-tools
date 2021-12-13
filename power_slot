@@ -85,22 +85,22 @@ def Get_SASController():
 
 	for line in output_lspci.splitlines():
 
-		# Falcon is our 1st gen SAS controller (cms-depot1-17,19-38)
+		# Falcon is our 1st gen SAS controller
 		if re.search(r"SAS2008 PCI-Express Fusion-MPT SAS-2 \[Falcon\] \(rev 03\)", line):
 			SAS_Controller = "LSI_Falcon"
 			break
 
-		# Thunderbolt is our 2nd gen SAS controller (cms-depot39-44)
+		# Thunderbolt is our 2nd gen SAS controller
 		if re.search(r"MegaRAID SAS 2208 \[Thunderbolt\] \(rev 05\)", line):
 			SAS_Controller = "LSI_Thunderbolt"
 			break
 
-		# Invader is our 3rd gen SAS controller (cms-depot45-80)
+		# Invader is our 3rd gen SAS controller
 		if re.search(r"MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
 			SAS_Controller = "LSI_Invader"
 			break
 
-		# HBA for cms-depot81-86
+		# Trimode is our 4th gen SAS controller
 		if re.search(r"SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
                         SAS_Controller = "LSI_FusionMPT"
                         break
