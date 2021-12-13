@@ -7,6 +7,7 @@ import math
 import time
 
 from subprocess import Popen, PIPE, STDOUT
+from prettytable import PrettyTable
 
 # Enable/disable debugging messages
 Print_Debug = True
@@ -104,7 +105,10 @@ def SysExec(cmd):
         Cache_Expires = 20
 
         # Computed once, used twice
-        Cache_Keys = list(CacheDataArray.keys())
+        Cache_Keys = CacheDataArray.keys()
+
+### Why is this broken??!?
+#        Cache_Keys = list(Cache_Keys)
         if cmd in Cache_Keys:
                 Cache_Age  = time.time() - CacheTimeArray[cmd]
         else:
@@ -137,56 +141,61 @@ def SysExec(cmd):
         return(Return_Val)
 
 
-VD_to_PD_Map = {}
-VD = []
-scsi_naa_id = ""
-PD = []
-for line in SysExec("storcli64 /c0 /vall show all").splitlines():
+def map_pd_to_vd_with_storcli():
+	"""
+	Find the mapping between virtual disk and physical disk on computers with a "storcli64" accesssible HBA
+	"""
 
-	if not re.search("/c0/|SCSI NAA| HDD ", line):
-		continue
+	VD_to_PD_Map = {}
+	VD = []
+	scsi_naa_id = ""
+	PD = []
+	for line in SysExec("storcli64 /c0 /vall show all").splitlines():
 
-	if re.search("/c0/", line):
-		VD = line.split("/")[2].split()[0]
+		if not re.search("/c0/|SCSI NAA| HDD ", line):
+			continue
 
-	if re.search(" HDD ", line):
-		PD.append(line.split()[0])
+		if re.search("/c0/", line):
+			VD = line.split("/")[2].split()[0]
 
-	if re.search("SCSI NAA", line):
-		scsi_naa_id = line.split("=")[1].strip()
+		if re.search(" HDD ", line):
+			PD.append(line.split()[0])
 
-	if PD and VD and scsi_naa_id:
+		if re.search("SCSI NAA", line):
+			scsi_naa_id = line.split("=")[1].strip()
 
-		VD_to_PD_Map[VD] = {}
+		if PD and VD and scsi_naa_id:
 
-		VD_to_PD_Map[VD]["scsi_naa_id"] = scsi_naa_id
-		VD_to_PD_Map[VD]["PD_List"] = PD
+			VD_to_PD_Map[VD] = {}
 
-		VD = []
-		scsi_naa_id = ""
-		PD = []
+			VD_to_PD_Map[VD]["scsi_naa_id"] = scsi_naa_id
+			VD_to_PD_Map[VD]["PD_List"] = PD
+
+			VD = []
+			scsi_naa_id = ""
+			PD = []
 
 
-for VD, list in VD_to_PD_Map.items():
-	print("DEBUG:  Parsing virtual disk " + VD)
+	PD_to_VD_Map = []
+	for VD, list in VD_to_PD_Map.items():
+		PD_List = VD_to_PD_Map[VD]["PD_List"]
+		for i in PD_List:
 
-	print("DEBUG:  scsi_naa_id = " + VD_to_PD_Map[VD]["scsi_naa_id"])
+			e = i.split(":")[0]
+			s = i.split(":")[1]
 
-	PD_List = VD_to_PD_Map[VD]["PD_List"]
-	for i in PD_List:
+			for line in SysExec("storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all").splitlines():
+				if re.search("^WWN", line):
+					WWN = line.split("=")[1].strip()
 
-		e = i.split(":")[0]
-		s = i.split(":")[1]
-		print("DEBUG: i = " + i + " and e = " + e + " and s = " + s)
+			PD_to_VD_Map.append([i, e, s, WWN.lower(), VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
 
-		cmd = "storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all"
-		print("DEBUG:  cmd = " + cmd)
+	return(PD_to_VD_Map)
 
-		cmd_output = SysExec(cmd)
-		print("DEBUG: cmd_output = " + cmd_output)
+PD_to_VD_Map = map_pd_to_vd_with_storcli()
 
-		for line in SysExec(cmd).splitlines():
-			if re.search("^WWN", line):
-				WWN = line.split("=")[1].strip()
-
-		print("DEBUG:  " + i  + " = " + WWN)
+x = PrettyTable(["E:S", "Enclosure", "Slot", "PD_WWN", "VD", "VD_WWN"])
+x.padding_width = 1
+for row in PD_to_VD_Map:
+        x.add_row(row)
+print(x)
