@@ -95,6 +95,8 @@ def Bin_Recommends(bin):
 def Bin_Suggests(bin):
         return which(bin)
 
+Bin_Requires("storcli64")
+
 def SysExec(cmd):
 
         """
