@@ -16,7 +16,7 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -427,7 +427,7 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
 
         MEGACLI_BIN = Bin_Suggests("MegaCli64")
         if MEGACLI_BIN is None:
-                print("INFO: The LSI 'MegaCli64' utility was not found.  Mapping drives to enclosure/slot might not work.")
+        #        print("INFO: The LSI 'MegaCli64' utility was not found.  Mapping drives to enclosure/slot might not work.")
                 return Map
 
         val_wwn = None
@@ -1227,7 +1227,9 @@ for bd in udevadm_dict:
 
 
 	if udevadm_dict[bd]["enclosure"] != "None":
-		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][str(int(udevadm_dict[bd]["slot"]) - 1)]["s_ident"]
+#		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][str(int(udevadm_dict[bd]["slot"]) - 1)]["s_ident"]
+		udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 1)
+		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][udevadm_dict[bd]["slot"]]["s_ident"]
 
 
 #	if udevadm_dict[bd]["enclosure"] in map_enclosure_e_to_alias:
@@ -1250,6 +1252,9 @@ for bd in udevadm_dict:
 	# This model lies about its size
 	if udevadm_dict[bd]["ID_MODEL"] == "ST8000NM0065":
 		udevadm_dict[bd]["DISK_SIZE"] = "8 TB"
+# PARTON
+#for bd in udevadm_dict:
+#	udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 1)
 
 Debug("udevadm_dict = " + str(udevadm_dict))
 

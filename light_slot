@@ -178,7 +178,6 @@ if not re.search(sys.argv[3], "on", re.IGNORECASE) and not re.search(sys.argv[3]
 	print("Error:  The location light can only be in state 'on' or 'off'.   You specified state '" + sys.argv[3] + "', which is invalid.")
 	sys.exit()
 
-
 if SAS_Controller == "LSI_Thunderbolt": # or SAS_Controller == "LSI_Invader":
 
 	Debug("Using MegaCli64 to switch locate LED...")
@@ -206,14 +205,24 @@ elif SAS_Controller == "LSI_Invader":
 
 	Debug("Using storcli64 to switch locate LED...")
 
+	Debug("Backplanes_List = " + str(Backplanes_List))
+
+#DEBUG:  Backplanes_List = {'/dev/sg0': {'NumSlots': '24', 'Bus': '0:0:8:0', 'SASAddr': '50015b21405d353f', 'Alias': 'Front'}, '/dev/sg1': {'NumSlots': '12', 'Bus': '0:0:9:0', 'SASAddr': '50015b2140632dbf', 'Alias': 'Back'}}
+
+
 	for bp, keyvals in Backplanes_List.items():
 		for key, val  in Backplanes_List[bp].items():
 			if re.search(sys.argv[1], val, re.IGNORECASE):
 				enclosure = Backplanes_List[bp]['Bus'].split(":")[2]
+				num_slots = int(Backplanes_List[bp]['NumSlots'])
 				break
 
 	if not "enclosure" in globals():
 		print("ERROR:  Could not detect enclosure " + sys.argv[1])
+		sys.exit()
+
+	if not int(sys.argv[2]) in range(0, num_slots):
+		print("ERROR:  Backplane only has " + str(num_slots) + " slots.")
 		sys.exit()
 
 	if re.search("on", sys.argv[3], re.IGNORECASE):
