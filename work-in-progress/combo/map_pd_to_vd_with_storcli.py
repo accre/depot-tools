@@ -10,7 +10,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -143,10 +143,48 @@ def SysExec(cmd):
         return(Return_Val)
 
 
+def map_WWN_to_Dev():
+
+	"""
+	Return a map of WWN -> /dev/whatever
+	"""
+
+	Debug("def map_VD_wwn_to_Dev() entry")
+
+	Map = {}
+
+	output_saslist = SysExec("ls -alh /dev/disk/by-id")
+
+	for line in output_saslist.splitlines():
+
+		if not re.search("wwn-", line):
+			continue
+
+		if re.search("part", line):
+			continue
+
+		This_Dev = line.split(" ")[-1]
+		This_Dev = This_Dev.split("/")[2]
+		This_Dev = re.sub("[0-9]*$", "", This_Dev)
+		This_Dev = "/dev/" + This_Dev
+
+		This_SAS = line.split(" ")[-3]
+		This_SAS = This_SAS.split("-")[1]
+		This_SAS = This_SAS.split("x")[1]
+
+		Debug("map_VD_wwn_to_Dev()::  Adding Dev " + This_Dev + " SAS " + This_SAS)
+		Map[This_SAS] = This_Dev
+
+	return(Map)
+
+
 def map_pd_to_vd_with_storcli():
+
 	"""
 	Find the mapping between virtual disk and physical disk on computers with a "storcli64" accesssible HBA
 	"""
+
+	map_vd_dev = map_WWN_to_Dev()
 
 	VD_to_PD_Map = {}
 	VD = []
@@ -187,16 +225,20 @@ def map_pd_to_vd_with_storcli():
 			s = i.split(":")[1]
 
 			for line in SysExec("storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all").splitlines():
+
 				if re.search("^WWN", line):
 					WWN = line.split("=")[1].strip()
 
-			PD_to_VD_Map.append([i, e, s, WWN.lower(), VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
+				if re.search("^SN", line):
+					Serial = line.split("=")[1].strip()
+
+			PD_to_VD_Map.append([i, e, s, map_vd_dev[VD_to_PD_Map[VD]["scsi_naa_id"]], WWN.lower(), Serial, VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
 
 	return(PD_to_VD_Map)
 
 PD_to_VD_Map = map_pd_to_vd_with_storcli()
 
-x = PrettyTable(["E:S", "Enclosure", "Slot", "PD_WWN", "VD", "VD_WWN"])
+x = PrettyTable(["E:S", "Enclosure", "Slot", "SD_Dev", "PD_WWN", "Serial", "VD", "VD_WWN"])
 x.padding_width = 1
 for row in PD_to_VD_Map:
         x.add_row(row)

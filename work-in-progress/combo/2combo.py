@@ -16,7 +16,7 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -254,6 +254,111 @@ def map_sd_to_sg():
 	return(map)
 
 
+def map_WWN_to_Dev():
+
+        """
+        Return a map of virtual disk WWN -> /dev/whatever
+        """
+
+        Debug("def map_VD_wwn_to_Dev() entry")
+
+        Map = {}
+
+        output_saslist = SysExec("ls -alh /dev/disk/by-id")
+
+        for line in output_saslist.splitlines():
+
+                if not re.search("wwn-", line):
+                        continue
+
+                if re.search("part", line):
+                        continue
+
+                This_Dev = line.split(" ")[-1]
+                This_Dev = This_Dev.split("/")[2]
+                This_Dev = re.sub("[0-9]*$", "", This_Dev)
+                This_Dev = "/dev/" + This_Dev
+
+                This_SAS = line.split(" ")[-3]
+                This_SAS = This_SAS.split("-")[1]
+                This_SAS = This_SAS.split("x")[1]
+
+                Debug("map_VD_wwn_to_Dev()::  Adding Dev " + This_Dev + " SAS " + This_SAS)
+                Map[This_SAS] = This_Dev
+
+        return(Map)
+
+
+def map_pd_to_vd_with_storcli():
+
+	"""
+	Find the mapping between virtual disk and physical disk on computers with a "storcli64" accesssible HBA
+	"""
+
+	Debug("map_pd_to_vd_with_storcli():: Function entry")
+
+	map_vd_dev = map_WWN_to_Dev()
+
+	VD_to_PD_Map = {}
+	VD = []
+	scsi_naa_id = ""
+	PD = []
+	for line in SysExec("storcli64 /c0 /vall show all").splitlines():
+
+		if not re.search("/c0/|SCSI NAA| HDD ", line):
+			continue
+
+		if re.search("/c0/", line):
+			VD = line.split("/")[2].split()[0]
+
+		if re.search(" HDD ", line):
+			PD.append(line.split()[0])
+
+		if re.search("SCSI NAA", line):
+			scsi_naa_id = line.split("=")[1].strip()
+
+		if PD and VD and scsi_naa_id:
+
+			VD_to_PD_Map[VD] = {}
+
+			VD_to_PD_Map[VD]["scsi_naa_id"] = scsi_naa_id
+			VD_to_PD_Map[VD]["PD_List"] = PD
+
+			VD = []
+			scsi_naa_id = ""
+			PD = []
+
+	PD_to_VD_Map = []
+	for VD, list in VD_to_PD_Map.items():
+		PD_List = VD_to_PD_Map[VD]["PD_List"]
+		for i in PD_List:
+
+			e = i.split(":")[0]
+			s = i.split(":")[1]
+
+			for line in SysExec("storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all").splitlines():
+
+				if re.search("^WWN", line):
+					WWN = line.split("=")[1].strip()
+
+				if re.search("^SN", line):
+					Serial = line.split("=")[1].strip()
+
+				if re.search("Manufacturer Id", line):
+					Mfg_Id = line.split("=")[1].strip()
+
+				if re.search("Model Number", line):
+					Model = line.split("=")[1].strip()
+
+			PD_to_VD_Map.append([i, e, s, map_vd_dev[VD_to_PD_Map[VD]["scsi_naa_id"]], WWN.lower(), Mfg_Id, Model, Serial, VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
+
+	Debug("map_pd_to_vd_with_storcli():: PD_to_VD_Map = " + str(PD_to_VD_Map))
+
+	Debug("map_pd_to_vd_with_storcli():: Function exit")
+
+	return(PD_to_VD_Map)
+
+
 def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 	"""
@@ -367,63 +472,6 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
         return Map
 
 
-def map_pd_to_vd_with_storcli():
-        """
-        Find the mapping between virtual disk and physical disk on computers with a "storcli64" accesssible HBA
-        """
-
-        VD_to_PD_Map = {}
-        VD = []
-        scsi_naa_id = ""
-        PD = []
-        for line in SysExec("storcli64 /c0 /vall show all").splitlines():
-
-                if not re.search("/c0/|SCSI NAA| HDD ", line):
-                        continue
-
-                if re.search("/c0/", line):
-                        VD = line.split("/")[2].split()[0]
-
-                if re.search(" HDD ", line):
-                        PD.append(line.split()[0])
-
-                if re.search("SCSI NAA", line):
-                        scsi_naa_id = line.split("=")[1].strip()
-
-                if PD and VD and scsi_naa_id:
-
-                        VD_to_PD_Map[VD] = {}
-
-                        VD_to_PD_Map[VD]["scsi_naa_id"] = scsi_naa_id
-                        VD_to_PD_Map[VD]["PD_List"] = PD
-
-                        VD = []
-                        scsi_naa_id = ""
-                        PD = []
-
-
-        PD_to_VD_Map = []
-        for VD, list in VD_to_PD_Map.items():
-                PD_List = VD_to_PD_Map[VD]["PD_List"]
-                for i in PD_List:
-
-                        e = i.split(":")[0]
-                        s = i.split(":")[1]
-
-                        for line in SysExec("storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all").splitlines():
-
-                                if re.search("^WWN", line):
-                                        WWN = line.split("=")[1].strip()
-                                if re.search("^SN = ", line):
-                                        Serial = line.split("=")[1].strip()
-
-                        PD_to_VD_Map.append([i, e, s, WWN.lower(), Serial, VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
-
-#        Debug("map_pd_to_vd_with_storcli():: PD_to_VD_Map = " + str(PD_to_VD_Map))
-
-        return(PD_to_VD_Map)
-
-
 def dict_VD_to_PD():
 	"""
 	Return a simple dict of virtual disk wwn -> physical disk wwn
@@ -432,7 +480,7 @@ def dict_VD_to_PD():
 	Dict_VD_to_PD = {}
 
 	for i in map_pd_to_vd_with_storcli():
-		Dict_VD_to_PD[i[6]] = hex(int(i[3], 16) + 1).split("x")[1].lower()
+		Dict_VD_to_PD[i[9]] = hex(int(i[4], 16) + 1).split("x")[1].lower()
 
 	return(Dict_VD_to_PD)
 
@@ -445,7 +493,7 @@ def dict_ES_to_Serial():
 	Dict_ES_to_Serial = {}
 
 	for i in map_pd_to_vd_with_storcli():
-		Dict_ES_to_Serial[i[0]] = i[4]
+		Dict_ES_to_Serial[i[0]] = i[7]
 
 	Debug("dict_ES_to_Serial():: Map = " + str(Dict_ES_to_Serial))
 
@@ -505,6 +553,22 @@ def List_Slots(e):
 	Debug("List_Slots:: slots for enclosure " + e + " = " + str(slots))
 
 	return(slots)
+
+
+def GetLocateLEDState(This_Backplane, This_Slot):
+        """
+        This function returns the state of the Locate LED on the given backplane/slot
+        """
+
+        This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
+
+        LedState_Descr = "Unknown"
+        if This_LedState == "1":
+                LedState_Descr = "On"
+        if This_LedState == "0":
+                LedState_Descr = "Off"
+
+        return LedState_Descr
 
 
 def findRawSize(SD_Device):
@@ -712,6 +776,8 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 	Try to de-crapify the Serial Number (again, polluted with other fields)
 	"""
 
+#	Debug("HumanFriendlySerial():: Start Serial = " + str(Serial))
+
 	NO_SERIAL = "NO_SERIAL"
 
 	if Serial == Model:
@@ -732,6 +798,8 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 	if not Serial:
 		Serial = "NO_SERIAL"
 
+#	Debug("HumanFriendlySerial():: End Serial = " + str(Serial))
+
 	return Serial
 
 def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
@@ -745,6 +813,12 @@ def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
 	HR_Serial  = "None"
 	HBA_Serial = "None"
 
+#	Debug("standardize_Serial():: Start serial = " + str(SCSI_IDENT_SERIAL) + " and "  + str(ID_SCSI_SERIAL))
+
+	# Bail out on virtual disks quick...
+	if len(ID_SCSI_SERIAL) == 32 and ID_SCSI_SERIAL.endswith("00506"):
+		return(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL)
+
 	if SCSI_IDENT_SERIAL == ID_SCSI_SERIAL:
 		if re.search("^5", SCSI_IDENT_SERIAL) or re.search("0x5", SCSI_IDENT_SERIAL):
 			HBA_Serial = SCSI_IDENT_SERIAL
@@ -753,18 +827,26 @@ def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
 			HR_Serial = SCSI_IDENT_SERIAL
 			HBA_Serial = "Unknown"
 
+#	Debug("standardize_Serial():: Intermediate 1 = " + str(HR_Serial) + " and "  + str(HBA_Serial))
+
 	if re.search("^5", SCSI_IDENT_SERIAL) or re.search("0x5", SCSI_IDENT_SERIAL):
 		HBA_Serial = SCSI_IDENT_SERIAL
 	else:
 		HR_Serial  = SCSI_IDENT_SERIAL
+
+#	Debug("standardize_Serial():: Intermediate 2 = " + str(HR_Serial) + " and "  + str(HBA_Serial))
 
 	if re.search("^5", ID_SCSI_SERIAL) or re.search("0x5", ID_SCSI_SERIAL):
 		HBA_Serial = ID_SCSI_SERIAL
 	else:
 		HR_Serial  = ID_SCSI_SERIAL
 
+#	Debug("standardize_Serial():: Intermediate 3 = " + str(HR_Serial) + " and "  + str(HBA_Serial))
+
 	if HR_Serial == "None" or HR_Serial == "Unknown":
 		HR_Serial = HBA_Serial
+
+#	Debug("standardize_Serial():: Final serial = " + str(HR_Serial) + " and "  + str(HBA_Serial))
 
 	return (HR_Serial, HBA_Serial)
 
@@ -795,10 +877,15 @@ for i in Controller:
 enclosures = Get_Enclosure_Info()
 Debug("enclosures = " + str(enclosures))
 
-map_enclosure_to_alias = {}
+map_enclosure_sgdev_to_alias = {}
 for i in enclosures:
-	map_enclosure_to_alias[i[0]] = i[4]
-Debug("map_enclosure_to_alias = " + str(map_enclosure_to_alias))
+	map_enclosure_sgdev_to_alias[i[0]] = i[4]
+Debug("map_enclosure_sgdev_to_alias = " + str(map_enclosure_sgdev_to_alias))
+
+map_enclosure_e_to_alias = {}
+for i in enclosures:
+	map_enclosure_e_to_alias[i[2].split(":")[2]] = i[4]
+Debug("map_enclosure_e_to_alias = " + str(map_enclosure_e_to_alias))
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
 sg_ses_dict = {}
@@ -982,6 +1069,24 @@ for bd in udevadm_dict:
 	if not "SCSI_VENDOR" in udevadm_dict[bd]:
 		udevadm_dict[bd]["SCSI_VENDOR"] = " "
 
+	# Virtual disks on LSI HBA's
+	if len(udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) == 32 and udevadm_dict[bd]["SCSI_IDENT_SERIAL"].endswith("00506"):
+		if not "map_dev_to_serial" in globals():
+			Virtual_Disks_Present = True
+			map_dev_to_serial = map_pd_to_vd_with_storcli()
+
+			map_tmp_mfg = {}
+			map_tmp_model = {}
+			map_tmp_serial = {}
+			for i in map_dev_to_serial:
+				map_tmp_mfg[i[3]]    = i[5]
+				map_tmp_model[i[3]]  = i[6]
+				map_tmp_serial[i[3]] = i[7]
+
+		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = map_tmp_serial[bd]
+		udevadm_dict[bd]["ID_MODEL"]          = map_tmp_model[bd]
+		udevadm_dict[bd]["SCSI_VENDOR"]       = map_tmp_mfg[bd]
+
 	if "ID_MODEL" in udevadm_dict[bd]:
 		udevadm_dict[bd]["SCSI_VENDOR"] = HumanFriendlyVendor(udevadm_dict[bd]["SCSI_VENDOR"], udevadm_dict[bd]["ID_MODEL"])
 
@@ -1013,10 +1118,6 @@ for bd in udevadm_dict:
 	# Trim the leading "WD-" on WDC Serial #'s
 	if udevadm_dict[bd]["SCSI_VENDOR"] == "WDC":
 		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = re.sub("^WD-", "", udevadm_dict[bd]["SCSI_IDENT_SERIAL"])
-
-	# If it looks like a reversed 64-bit WWN (our LSI HBA's use them for VD's), reverse them
-	if len(udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) == 32 and udevadm_dict[bd]["SCSI_IDENT_SERIAL"].endswith("00506"):
-		key = udevadm_dict[bd]["MAJOR"] + ":" + str(int(udevadm_dict[bd]["MINOR"]) + 1)
 
 
 ### Remove all entries except the ones in the whitelist
@@ -1091,27 +1192,51 @@ for bd in udevadm_dict:
 
 	udevadm_dict[bd]["DISK_SIZE"] = HumanFriendlyBytes(findRawSize(bd), 1000, 0)
 
-	# This model lies about its size
-	if udevadm_dict[bd]["ID_MODEL"] == "ST8000NM0065":
-		udevadm_dict[bd]["DISK_SIZE"] = "8 TB"
+	# Get enclosure/slots/led status for virtual disks
+	if "Virtual_Disks_Present" in vars():
+		Debug("Hello, Dolly!  Fix it here")
 
-	Debug("bd " + bd + " enclosure = " + udevadm_dict[bd]["enclosure"])
+		map_tmp_enclosure = {}
+		map_tmp_slot = {}
+		for i in map_dev_to_serial:
+			map_tmp_enclosure[i[3]] = i[1]
+			map_tmp_slot[i[3]]      = i[2]
+
+		if bd in map_tmp_enclosure:
+			udevadm_dict[bd]["enclosure"] = map_enclosure_e_to_alias[map_tmp_enclosure[bd]]
+			Debug("enclosure = " + str(udevadm_dict[bd]["enclosure"]))
+
+		if bd in map_tmp_slot:
+			udevadm_dict[bd]["slot"]      = map_tmp_slot[bd]
+			Debug("slot = " + udevadm_dict[bd]["slot"])
 
 	udevadm_dict[bd]["Enclosure_Alias"] = "None"
-	if udevadm_dict[bd]["enclosure"] in map_enclosure_to_alias:
-		udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_to_alias[udevadm_dict[bd]["enclosure"]]
+	if udevadm_dict[bd]["enclosure"] in map_enclosure_sgdev_to_alias:
+		udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_sgdev_to_alias[udevadm_dict[bd]["enclosure"]]
+
+	if udevadm_dict[bd]["enclosure"] in map_enclosure_e_to_alias:
+		udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_e_to_alias[udevadm_dict[bd]["enclosure"]]
+
+	if udevadm_dict[bd]["enclosure"] in map_enclosure_e_to_alias.values():
+		udevadm_dict[bd]["Enclosure_Alias"] = udevadm_dict[bd]["enclosure"]
+
 
 	if bd in sd_to_sg_map:
 		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
 	else:
 		udevadm_dict[bd]["SG_DEV"]    = "None"
 
-
 	if re.search("/dev/nvme", bd):
 		udevadm_dict[bd]["SG_DEV"]    = "None"
 		udevadm_dict[bd]["enclosure"] = "None"
 		udevadm_dict[bd]["slot"]      = "NA"
 		udevadm_dict[bd]["s_ident"]   = "None"
+
+	# This model lies about its size
+	if udevadm_dict[bd]["ID_MODEL"] == "ST8000NM0065":
+		udevadm_dict[bd]["DISK_SIZE"] = "8 TB"
+
+Debug("udevadm_dict = " + str(udevadm_dict))
 
 ##############################################################################
 ### PrettyPrint the dict and exit

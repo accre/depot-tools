@@ -17,7 +17,7 @@ from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -232,7 +232,27 @@ for e in enclosures:
 #				sg_ses_dict[e][s]["enclosure_rev"]     = line.split(":")[3].strip()
 
 
+sg_ses_dict = {k: v for k, v in sg_ses_dict.items() if v}
+
+#Debug("sg_ses_dict = " + str(sg_ses_dict))
+
+
+new_sg_ses_dict = {}
+for e in sg_ses_dict:
+	for s in sg_ses_dict[e]:
+		key = e + ":" + s
+		new_sg_ses_dict[key] = sg_ses_dict[e][s]
+
+
+Debug("new_sg_ses_dict = " + str(new_sg_ses_dict))
+
+
+
+
+
+
 # Get the list of column names for PrettyTable
+
 
 col = sg_ses_dict[enclosures[0]][slots[0]].keys()
 Debug("col = " + str(col))
@@ -243,7 +263,7 @@ for e in sg_ses_dict:
 	for s in sg_ses_dict[e]:
 
 		vals = sg_ses_dict[e][s].values()
-		Debug("vals = " + str(vals))
+#		Debug("vals = " + str(vals))
 
 		x.add_row(sg_ses_dict[e][s].values())
 print(x)
