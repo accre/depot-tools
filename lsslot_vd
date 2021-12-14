@@ -80,6 +80,64 @@ def SysExec(cmd):
         return(Return_Val)
 
 
+def List_Enclosures():
+
+        """
+        List enclosures.
+        """
+
+        # Our current depots have 24 slots on the Front backplane and 12 on the Rear
+        # In a more complex setup, we might need a more cumbersome way to alias backplanes
+        Alias_by_NumSlots = {}
+        Alias_by_NumSlots["24"] = "Front"
+        Alias_by_NumSlots["12"] = "Back"
+
+        # Array to hold the output for pretty printing
+        Output = []
+
+        Enclosure_Raw = SysExec("lsscsi -g")
+        for line in Enclosure_Raw.splitlines():
+
+                if not re.search("enclosu", line):
+                        continue
+
+                if re.search("VirtualSES", line):
+                        continue
+
+                Debug("line = " + line)
+
+                SG_Dev = line.split()[-1]
+
+                SG_Bus = line.split()[0]
+                SG_Bus = re.sub("\[", "", SG_Bus)
+                SG_Bus = re.sub("\]", "", SG_Bus)
+
+                SAS_Addr = "UNKNOWN_SAS"
+                SAS_Addr_Raw = SysExec("sg_ses --page=aes " + SG_Dev)
+                for text in SAS_Addr_Raw.splitlines():
+                        if re.search("Primary enclosure logical identifier", text):
+                                SAS_Addr = text.split(":")[1]
+                                SAS_Addr = re.sub(" ", "", SAS_Addr)
+
+                Num_Slots = "UNKNOWN_SLOTS"
+                Num_Slots_Raw  = SysExec("sg_ses --page=cf " + SG_Dev)
+                match = re.search(r'Array device slot(.*)ArrayDevicesInSubEnclsr0', Num_Slots_Raw, re.DOTALL)
+                match = match.group(0)
+                for l in match.splitlines():
+                        if re.search("number of possible elements", l):
+                                Num_Slots = l.split(":")[-1]
+                                Num_Slots = re.sub(" ", "", Num_Slots)
+
+
+                Alias = "UNKNOWN_ALIAS"
+                if Num_Slots in Alias_by_NumSlots:
+                        Alias = Alias_by_NumSlots[Num_Slots]
+
+                Output.append([SG_Dev, Num_Slots, SG_Bus, SAS_Addr, Alias])
+
+        return(Output)
+
+
 def FindBackplanes():
 
 	"""
@@ -294,22 +352,23 @@ def map_SAS_to_Dev():
 				Debug("map_SAS_to-Dev():: Map of PD_WWN to VD_WWN = " + str(PD_to_VD_Map))
 			break
 
-	Dict_VD_to_PD = {}
-	for i in PD_to_VD_Map:
-		Dict_VD_to_PD[i[5]] = hex(int(i[3], 16) + 1).split("x")[1].lower()
+	if Virtual_Disks_Found:
+		Dict_VD_to_PD = {}
+		for i in PD_to_VD_Map:
+			Dict_VD_to_PD[i[5]] = hex(int(i[3], 16) + 1).split("x")[1].lower()
 
-	Debug("map_SAS_to_Dev():: Map_Dict = " + str(Dict_VD_to_PD))
+		Debug("map_SAS_to_Dev():: Map_Dict = " + str(Dict_VD_to_PD))
 
-	# Remap virtual disks to their corresponding physical disk
-	tmp_Map = dict(Map)
-	for key in Map.keys():
+		# Remap virtual disks to their corresponding physical disk
+		tmp_Map = dict(Map)
+		for key in Map.keys():
 
-		Debug("map_SAS_to_Dev():: Scanning 1st pass key " + key + " and val " + tmp_Map[key])
+			Debug("map_SAS_to_Dev():: Scanning 1st pass key " + key + " and val " + tmp_Map[key])
 
-		if key in Dict_VD_to_PD:
-			Debug("map_SAS_to_Dev():: Remapping 1st pass " + key + " to " + Dict_VD_to_PD[key])
-			tmp_Map[Dict_VD_to_PD[key]] = tmp_Map.pop(key)
-	Map = dict(tmp_Map)
+			if key in Dict_VD_to_PD:
+				Debug("map_SAS_to_Dev():: Remapping 1st pass " + key + " to " + Dict_VD_to_PD[key])
+				tmp_Map[Dict_VD_to_PD[key]] = tmp_Map.pop(key)
+		Map = dict(tmp_Map)
 
 	Debug("def map_SAS_to_Dev() exit")
 
@@ -649,7 +708,8 @@ SAS_Controller = Get_SASController()
 
 # Foo = Get_ChassisBackplane()
 
-Backplane_List = FindBackplanes()
+#Backplane_List = FindBackplanes()
+Backplane_List = List_Enclosures()
 Backplane_Slot_to_Dev = map_Backplane_Slot_to_Dev(Backplane_List)
 Dev_to_RID = map_Dev_to_RID()
 

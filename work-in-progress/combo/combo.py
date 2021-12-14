@@ -16,7 +16,7 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -1127,7 +1127,7 @@ pretty_name = {
 	"DEVNAME":           "SD_Dev",   \
 	"SG_DEV":            "SG_Dev",   \
 	"enclosure":         "Enclosure",\
-	"Enclosure_Alias":   "Enclosure Alias", \
+	"Enclosure_Alias":   "EnclosureAlias", \
 	"slot":              "Slot",     \
 	"SCSI_VENDOR":       "Vendor",   \
 	"ID_MODEL":          "Model",    \
