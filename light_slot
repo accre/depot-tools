@@ -242,6 +242,7 @@ else:
 
 	for bp, keyvals in Backplanes_List.items():
 		for key, val  in Backplanes_List[bp].items():
+			num_slots = int(Backplanes_List[bp]['NumSlots'])
 			Debug("bp " + str(bp) + " key " + key + " val " + val)
 			if sys.argv[1] == val:
 				enclosure = bp
@@ -249,6 +250,10 @@ else:
 
 	if not enclosure:
 		print("Error:  The backplane '" + sys.argv[1] + "' could not be found.")
+		sys.exit()
+
+	if not int(sys.argv[2]) in range(0, num_slots):
+		print("ERROR:  Backplane only has " + str(num_slots) + " slots.")
 		sys.exit()
 
 	State = sys.argv[3]
