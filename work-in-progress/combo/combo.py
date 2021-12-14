@@ -16,7 +16,7 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -96,7 +96,6 @@ def Bin_Recommends(bin):
         #       print("INFO:  This program would run better with " + bin + " in the PATH")
         return bin_path
 
-
 # If a suggested binary isn't available, run anyway
 def Bin_Suggests(bin):
         return which(bin)
@@ -106,6 +105,8 @@ def SysExec(cmd):
         """
         Run the given command and return the output
         """
+
+#        Debug("SysExec()::  cmd = " + cmd)
 
         # Cache the output of the command for 20 seconds
         Cache_Expires = 20
@@ -142,6 +143,7 @@ def SysExec(cmd):
                 Return_Val = Return_Val.decode("utf-8")
 
         return(Return_Val)
+
 
 def Get_SASController():
 
@@ -196,8 +198,6 @@ def Get_Enclosure_Info():
                 if re.search("VirtualSES", line):
                         continue
 
-                Debug("line = " + line)
-
                 SG_Dev = line.split()[-1]
 
                 SG_Bus = line.split()[0]
@@ -238,6 +238,9 @@ def map_sd_to_sg():
 	map = {}
 
 	for line in SysExec("lsscsi -g").splitlines():
+
+		if re.search("enclosu", line):
+			continue
 
 		line = re.sub('\s+',' ',line).strip()
 
@@ -291,7 +294,7 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 			val_wwn = line.split(":")[1]
 			val_wwn = re.sub(" ", "", val_wwn)
 
-#		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
+		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
 
 		if val_device and val_sas and val_wwn:
 			if val_device == "Hard disk":
@@ -299,7 +302,7 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 			val_device    = None
 			val_sas       = None
-			val_wwn      = None
+			val_wwn       = None
 
 	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu(): Map = " + str(Map))
 	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() exit")
@@ -359,10 +362,94 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
                         val_sas = None
 
         Debug("def map_intermediate_SAS_to_WWN_with_Megacli():: Map = " + str(Map))
-
         Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() exit")
 
         return Map
+
+
+def map_pd_to_vd_with_storcli():
+        """
+        Find the mapping between virtual disk and physical disk on computers with a "storcli64" accesssible HBA
+        """
+
+        VD_to_PD_Map = {}
+        VD = []
+        scsi_naa_id = ""
+        PD = []
+        for line in SysExec("storcli64 /c0 /vall show all").splitlines():
+
+                if not re.search("/c0/|SCSI NAA| HDD ", line):
+                        continue
+
+                if re.search("/c0/", line):
+                        VD = line.split("/")[2].split()[0]
+
+                if re.search(" HDD ", line):
+                        PD.append(line.split()[0])
+
+                if re.search("SCSI NAA", line):
+                        scsi_naa_id = line.split("=")[1].strip()
+
+                if PD and VD and scsi_naa_id:
+
+                        VD_to_PD_Map[VD] = {}
+
+                        VD_to_PD_Map[VD]["scsi_naa_id"] = scsi_naa_id
+                        VD_to_PD_Map[VD]["PD_List"] = PD
+
+                        VD = []
+                        scsi_naa_id = ""
+                        PD = []
+
+
+        PD_to_VD_Map = []
+        for VD, list in VD_to_PD_Map.items():
+                PD_List = VD_to_PD_Map[VD]["PD_List"]
+                for i in PD_List:
+
+                        e = i.split(":")[0]
+                        s = i.split(":")[1]
+
+                        for line in SysExec("storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all").splitlines():
+
+                                if re.search("^WWN", line):
+                                        WWN = line.split("=")[1].strip()
+                                if re.search("^SN = ", line):
+                                        Serial = line.split("=")[1].strip()
+
+                        PD_to_VD_Map.append([i, e, s, WWN.lower(), Serial, VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
+
+#        Debug("map_pd_to_vd_with_storcli():: PD_to_VD_Map = " + str(PD_to_VD_Map))
+
+        return(PD_to_VD_Map)
+
+
+def dict_VD_to_PD():
+	"""
+	Return a simple dict of virtual disk wwn -> physical disk wwn
+	"""
+
+	Dict_VD_to_PD = {}
+
+	for i in map_pd_to_vd_with_storcli():
+		Dict_VD_to_PD[i[6]] = hex(int(i[3], 16) + 1).split("x")[1].lower()
+
+	return(Dict_VD_to_PD)
+
+
+def dict_ES_to_Serial():
+	"""
+	Return a simple dict of E:S -> Serial # for virtual disks since they obscure the actual serial #
+	"""
+
+	Dict_ES_to_Serial = {}
+
+	for i in map_pd_to_vd_with_storcli():
+		Dict_ES_to_Serial[i[0]] = i[4]
+
+	Debug("dict_ES_to_Serial():: Map = " + str(Dict_ES_to_Serial))
+
+	return(Dict_ES_to_Serial)
 
 
 def List_BlockDevices():
@@ -708,6 +795,15 @@ for i in Controller:
 enclosures = Get_Enclosure_Info()
 Debug("enclosures = " + str(enclosures))
 
+map_enclosure_to_alias = {}
+for i in enclosures:
+	map_enclosure_to_alias[i[0]] = i[4]
+Debug("map_enclosure_to_alias = " + str(map_enclosure_to_alias))
+
+
+
+#DEBUG: enclosures = [['/dev/sg0', '24', '0:0:8:0', '50015b21405d353f', 'Front'], ['/dev/sg1', '12', '0:0:9:0', '50015b2140632dbf', 'Back']]
+
 # Blank dictionary to hold parsed output from the "sg_ses" command
 sg_ses_dict = {}
 
@@ -839,6 +935,8 @@ for bd in blockdevs:
 sorted_keys = sorted(udevadm_dict.keys())
 udevadm_dict = {key:udevadm_dict[key] for key in sorted_keys}
 
+#Debug("Main:: udevadm_dict = " + str(udevadm_dict))
+
 ### Now we want to iterate over and simplify/clarify a few things
 for bd in udevadm_dict:
 
@@ -920,6 +1018,11 @@ for bd in udevadm_dict:
 	if udevadm_dict[bd]["SCSI_VENDOR"] == "WDC":
 		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = re.sub("^WD-", "", udevadm_dict[bd]["SCSI_IDENT_SERIAL"])
 
+	# If it looks like a reversed 64-bit WWN (our LSI HBA's use them for VD's), reverse them
+	if len(udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) == 32 and udevadm_dict[bd]["SCSI_IDENT_SERIAL"].endswith("00506"):
+		key = udevadm_dict[bd]["MAJOR"] + ":" + str(int(udevadm_dict[bd]["MINOR"]) + 1)
+
+
 ### Remove all entries except the ones in the whitelist
 tmp = {}
 for bd in udevadm_dict:
@@ -996,6 +1099,11 @@ for bd in udevadm_dict:
 	if udevadm_dict[bd]["ID_MODEL"] == "ST8000NM0065":
 		udevadm_dict[bd]["DISK_SIZE"] = "8 TB"
 
+	Debug("bd " + bd + " enclosure = " + udevadm_dict[bd]["enclosure"])
+
+	udevadm_dict[bd]["Enclosure_Alias"] = "None"
+	if udevadm_dict[bd]["enclosure"] in map_enclosure_to_alias:
+		udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_to_alias[udevadm_dict[bd]["enclosure"]]
 
 	if bd in sd_to_sg_map:
 		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
@@ -1019,6 +1127,7 @@ pretty_name = {
 	"DEVNAME":           "SD_Dev",   \
 	"SG_DEV":            "SG_Dev",   \
 	"enclosure":         "Enclosure",\
+	"Enclosure_Alias":   "Enclosure Alias", \
 	"slot":              "Slot",     \
 	"SCSI_VENDOR":       "Vendor",   \
 	"ID_MODEL":          "Model",    \
