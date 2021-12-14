@@ -104,8 +104,6 @@ def List_Enclosures():
                 if re.search("VirtualSES", line):
                         continue
 
-                Debug("line = " + line)
-
                 SG_Dev = line.split()[-1]
 
                 SG_Bus = line.split()[0]
@@ -141,30 +139,22 @@ def List_Enclosures():
 def FindBackplanes():
 
 	"""
-	Use the "lsbackplane" command to return info about backplanes in the server.
+	Use the "List_Enclosures" function to create a dict about the enclosures in this server
 	"""
 
 	Debug("def FindBackplanes() entry")
 
+	enclosures = List_Enclosures()
+
 	Backplanes = {}
 
-	# Iterate over a list of enclosures
-	output_lsbackplane = SysExec("lsbackplane")
+	for i in enclosures:
+		Backplanes[i[0]] = {}
 
-	for line in output_lsbackplane.splitlines():
-
-		if not re.search("/dev/", line):
-			continue
-
-		Enc_SG_Dev = line.split("|")[1].strip()
-
-		Backplanes[Enc_SG_Dev] = {}
-		Backplanes[Enc_SG_Dev]["NumSlots"] = line.split("|")[2].strip()
-		Backplanes[Enc_SG_Dev]["Bus"] = line.split("|")[3].strip()
-		Backplanes[Enc_SG_Dev]["SASAddr"] = line.split("|")[4].strip()
-		Backplanes[Enc_SG_Dev]["Alias"] = line.split("|")[5].strip()
-
-		Debug("FindBackplanes()::  Backplane " + Enc_SG_Dev + " NumSlots " + Backplanes[Enc_SG_Dev]["NumSlots"] + " Bus " + Backplanes[Enc_SG_Dev]["Bus"] + " SASAddr " + Backplanes[Enc_SG_Dev]["SASAddr"] + " Alias " + Backplanes[Enc_SG_Dev]["Alias"])
+		Backplanes[i[0]]["NumSlots"] = i[1]
+		Backplanes[i[0]]["Bus"]      = i[2]
+		Backplanes[i[0]]["SASAddr"]  = i[3]
+		Backplanes[i[0]]["Alias"]    = i[4]
 
 	Debug("def FindBackplanes() exit")
 
@@ -256,11 +246,6 @@ def GetLocateLEDState(This_Backplane, This_Slot):
 	This function returns the state of the Locate LED on the given backplane/slot
 	"""
 
-	# I omit the entry/exit debugs as this function is near bulletproof and gets
-	# called several zillion times, which interferes with actual debugging.
-
-#	Debug("deg GetLocateLEDState():: This_Backplane = " + str(This_Backplane) + " and This_Slot = " + str(This_Slot))
-
 	This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
 
 	LedState_Descr = "Unknown"
@@ -268,8 +253,6 @@ def GetLocateLEDState(This_Backplane, This_Slot):
 		LedState_Descr = "On"
 	if This_LedState == "0":
 		LedState_Descr = "Off"
-
-#	Debug("GetLocateLEDState(): Backplane " + Backplane + " Slot " + str(i) + " is set to " + LedState_Descr)
 
 	return(LedState_Descr)
 
@@ -444,7 +427,7 @@ def map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes):
 
 	for This_Backplane in AllBackplanes:
 
-		Debug("map_Backplane_Slot_to_SAS_with_sgses::  This_Backplane = " + This_Backplane)
+		Debug("map_Backplane_Slot_to_SAS_with_sgses::  This_Backplane = " + str(This_Backplane))
 
 		Map[This_Backplane] = {}
 
@@ -703,13 +686,9 @@ def map_Backplane_Slot_to_Dev(AllBackplanes):
 # Main Loop
 #############################################################################
 
-# Adjust this for any HBA-dependent stuff (shift-by-two, intermediate SAS->WWN)
 SAS_Controller = Get_SASController()
 
-# Foo = Get_ChassisBackplane()
-
-#Backplane_List = FindBackplanes()
-Backplane_List = List_Enclosures()
+Backplane_List = FindBackplanes()
 Backplane_Slot_to_Dev = map_Backplane_Slot_to_Dev(Backplane_List)
 Dev_to_RID = map_Dev_to_RID()
 
