@@ -1125,10 +1125,7 @@ for bd in udevadm_dict:
 pretty_name = {
 	#  Old_Name             New_Name  \
 	"DEVNAME":           "SD_Dev",   \
-	"SG_DEV":            "SG_Dev",   \
-	"enclosure":         "Enclosure",\
-	"Enclosure_Alias":   "EnclosureAlias", \
-	"slot":              "Slot",     \
+#	"SG_DEV":            "SG_Dev",   \
 	"SCSI_VENDOR":       "Vendor",   \
 	"ID_MODEL":          "Model",    \
 	"SCSI_IDENT_SERIAL": "Serial",   \
@@ -1136,6 +1133,9 @@ pretty_name = {
 	"ID_BUS":            "Bus",      \
 	"MEDIA_TYPE":        "Media",    \
 	"DISK_SIZE":         "Size",     \
+#	"enclosure":         "Enclosure",\
+	"Enclosure_Alias":   "Enclosure", \
+	"slot":              "Slot",     \
 	"s_ident":           "Locate_LED"
 }
 print_list  = pretty_name.keys()
