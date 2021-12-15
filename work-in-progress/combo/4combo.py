@@ -16,7 +16,7 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 # Cache info from SysExec
 CacheDataArray = {}
@@ -1156,14 +1156,16 @@ for bd in udevadm_dict:
 			search = udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]
 
 	if search == "unknown" and "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
-		if re.search("^5", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]):
+		if re.search("^5", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) and len(udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) == 32:
 			# We want to subtract 2 from whatever value is here
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
+			print("DEBUG:  search = " + str(search))
+
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
 
 	if search == "unknown" and "ID_SERIAL_SHORT" in udevadm_dict[bd]:
-		if re.search("^5", udevadm_dict[bd]["ID_SERIAL_SHORT"]):
+		if re.search("^5", udevadm_dict[bd]["ID_SERIAL_SHORT"]) and len(udevadm_dict[bd]["ID_SERIAL_SHORT"]) == 32:
 			# We want to subtract 2 from whatever value is here
 			search = udevadm_dict[bd]["ID_SERIAL_SHORT"]
 			search = hex(int(search, 16) - 2)
@@ -1228,7 +1230,9 @@ for bd in udevadm_dict:
 
 	if udevadm_dict[bd]["enclosure"] != "None":
 #		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][str(int(udevadm_dict[bd]["slot"]) - 1)]["s_ident"]
-		udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 1)
+
+		# The offset has to be changed on a per-card basis.  :-/
+		udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) + 0)
 		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][udevadm_dict[bd]["slot"]]["s_ident"]
 
 
