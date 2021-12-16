@@ -1449,8 +1449,6 @@ for bd in udevadm_dict:
 			map_tmp_enclosure[i[3]] = i[1]
 			map_tmp_slot[i[3]]      = i[2]
 
-# map_enclosure_e_to_sgdev
-
 		if bd in map_tmp_enclosure:
 			udevadm_dict[bd]["enclosure"] = map_enclosure_e_to_sgdev[map_tmp_enclosure[bd]]
 			Debug("main():: enclosure = " + str(udevadm_dict[bd]["enclosure"]))
@@ -1502,12 +1500,7 @@ for bd in udevadm_dict:
 Debug("main():: udevadm_dict = " + str(udevadm_dict))
 
 
-
-##############################################################################
-### PrettyPrint the dict and exit
-##############################################################################
-
-#def PrettyPrint(Dict_To_Print, PrettyNames_Dict):
+# PrettyPrint the dict and exit
 
 # Rename these columns to something human-readible when we print
 pretty_name = {
