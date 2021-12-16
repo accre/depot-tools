@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 """
-Parse the output of the "sg_ses" and "udevadm" utilities and print some useful stuff.
-Will eventually be a replacement for both "lsblock" and "lsslot"
-Dependencies:  lsscsi, python "prettytable" package, smartctl (for nvme drives)
+lsblock - List block devices visible to the OS, along with useful info like
+          enclosure, slot, and locate led status.   It wraps around HBA-specific
+          tools like storcli, MegaCLI, sas2irc, etc.   It will also see through
+          virtual disks to provide info on the underlying physical disk
 
+Dependencies:  lsscsi, smartctl (for nvme drives), sg_ses, python "prettytable" pkg
 """
 
 import re
@@ -36,7 +38,6 @@ def Debug(text):
 def which(program):
 
         """
-
         Functions similar to the 'which' program in Unix.  Given
         an executable filename, it will return the whole path to
         that executable.
@@ -49,7 +50,8 @@ def which(program):
         """
 
         def is_exe(fpath):
-                return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+#                return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+                return(os.path.exists(fpath) and os.access(fpath, os.X_OK))
 
         def ext_candidates(fpath):
                 yield fpath
@@ -60,53 +62,64 @@ def which(program):
 
         if fpath:
                 if is_exe(program):
-                        return program
+                        return(program)
         else:
                 for path in os.environ["PATH"].split(os.pathsep):
                         exe_file = os.path.join(path, program)
                         for candidate in ext_candidates(exe_file):
                                 if is_exe(candidate):
-                                        return candidate
+                                        return(candidate)
 
 
-# If a required binary isn't available, quit.
 def Bin_Requires(bin):
 
-	# Because "bin" is required for this script to run, we do a little
-	# extra work trying to find it before giving up.
+	"""
+	Exit gracefully if required binary is not found
+	"""
 
 	if os.path.isfile("/sbin/" + bin):
-		return "/sbin/" + bin
+		return("/sbin/" + bin)
 	elif os.path.isfile("/usr/sbin/" + bin):
-		return  "/usr/sbin/" + bin
+		return("/usr/sbin/" + bin)
 	elif os.path.isfile("/usr/local/sbin/" + bin):
-		return  "/usr/local/sbin/" + bin
+		return("/usr/local/sbin/" + bin)
 
 	bin_path = which(bin)
 	if not bin_path:
 		print("ERROR: Could not locate " + bin + " in the PATH")
 		sys.exit()
-	return bin_path
+	return(bin_path)
 
-# If a recommended binary isn't available, you can still run, but let
-# the user know it would work better if the binary was available
+
 def Bin_Recommends(bin):
-        bin_path = which(bin)
-        #if not bin_path:
-        #       print("INFO:  This program would run better with " + bin + " in the PATH")
-        return bin_path
 
-# If a suggested binary isn't available, run anyway
+	"""
+	If a recommended binary isn't available, you can still run, but let
+	the user know it would work better if the binary was available
+	"""
+
+	bin_path = which(bin)
+	#if not bin_path:
+	#       print("INFO:  This program would run better with " + bin + " in the PATH")
+	return(bin_path)
+
+
 def Bin_Suggests(bin):
-        return which(bin)
+
+	"""
+	If a suggested binary isn't available, run anyway
+	"""
+	bin_path = which(bin)
+	#if not bin_path:
+	#       print("INFO:  This program would run better with " + bin + " in the PATH")
+	return(bin_path)
+
 
 def SysExec(cmd):
 
         """
         Run the given command and return the output
         """
-
-#       Debug("SysExec()::  cmd = " + cmd)
 
         # Cache the output of the command for 20 seconds
         Cache_Expires = 20
@@ -151,7 +164,7 @@ def Get_SASController():
 	Return the SAS controller model in this depot.
 	"""
 
-	Debug("def Get_SASController() entry")
+	Debug("Get_SASController():: function entry")
 
 	output_lspci = SysExec("lspci")
 
@@ -169,9 +182,36 @@ def Get_SASController():
 	if "Unknown" in SAS_Controller:
 		Debug("Get_SASController()::  There is an unknown controller type in this system.")
 
-	Debug("def Get_SASController() exit")
+	Debug("Get_SASController():: function exit")
 
-	return SAS_Controller
+	return(SAS_Controller)
+
+
+def Get_SASController_ExecType(Controller):
+
+	"""
+	Return the type ("sas2ircu", "megacli", "storcli", etc) used by the HBA controller
+	"""
+
+	Debug("Get_SASController_ExecType()::  Controller = " + Controller)
+
+	Controller_Type = "Unknown"
+
+	# LSI Falcon controllers use sas2ircu
+	if re.search("Falcon", Controller):
+		Controller_Type = "sas2ircu"
+
+	# LSI Thunderbolt and LSI Invader use MegaCLI
+	if re.search("Thunderbolt", Controller) or re.search("Invader", Controller):
+		Controller_Type = "megacli"
+
+	# LSI Tri-Mode uses storcli
+	if re.search("Tri-Mode", Controller):
+		Controller_Type = "storcli"
+
+	Debug("Get_SASController_ExecType()::  Controller_Type = " + Controller_Type)
+
+	return(Controller_Type)
 
 
 def Get_Enclosure_Info():
@@ -179,6 +219,8 @@ def Get_Enclosure_Info():
         """
         Get info on all enclosures.
         """
+
+        Debug("Get_Enclosure_Info():: function entry")
 
         # Our current depots have 24 slots on the Front backplane and 12 on the Rear
         # In a more complex setup, we might need a more cumbersome way to alias backplanes
@@ -210,6 +252,7 @@ def Get_Enclosure_Info():
                         if re.search("Primary enclosure logical identifier", text):
                                 SAS_Addr = text.split(":")[1]
                                 SAS_Addr = re.sub(" ", "", SAS_Addr)
+                                SAS_Addr = re.sub("^0x", "", SAS_Addr)
 
                 Num_Slots = "UNKNOWN_SLOTS"
                 Num_Slots_Raw  = SysExec("sg_ses --page=cf " + SG_Dev)
@@ -227,13 +270,19 @@ def Get_Enclosure_Info():
 
                 Output.append([SG_Dev, Num_Slots, SG_Bus, SAS_Addr, Alias])
 
+        Debug("Get_Enclosure_Info():: Output = " + str(Output))
+        Debug("Get_Enclosure_Info():: function exit")
+
         return(Output)
 
 
 def map_sd_to_sg():
+
 	"""
 	Return a map of SD device (/dev/sda) to SG Device (/dev/sg24)
 	"""
+
+	Debug("map_sd_to_sg():: function entry")
 
 	map = {}
 
@@ -250,6 +299,7 @@ def map_sd_to_sg():
 		map[sd_dev] = sg_dev
 
 	Debug("map_sd_to_sg:: map = " + str(map))
+	Debug("map_sd_to_sg():: function exit")
 
 	return(map)
 
@@ -260,7 +310,7 @@ def map_WWN_to_Dev():
         Return a map of virtual disk WWN -> /dev/whatever
         """
 
-        Debug("def map_VD_wwn_to_Dev() entry")
+        Debug("map_WWN_to_Dev():: function entry")
 
         Map = {}
 
@@ -284,7 +334,11 @@ def map_WWN_to_Dev():
                 This_SAS = This_SAS.split("x")[1]
 
                 Debug("map_VD_wwn_to_Dev()::  Adding Dev " + This_Dev + " SAS " + This_SAS)
+
                 Map[This_SAS] = This_Dev
+
+        Debug("map_WWN_to_Dev():: Map = " + str(Map))
+        Debug("map_WWN_to_Dev():: function exit")
 
         return(Map)
 
@@ -295,7 +349,7 @@ def map_pd_to_vd_with_storcli():
 	Find the mapping between virtual disk and physical disk on computers with a "storcli64" accesssible HBA
 	"""
 
-	Debug("map_pd_to_vd_with_storcli():: Function entry")
+	Debug("map_pd_to_vd_with_storcli():: function entry")
 
 	map_vd_dev = map_WWN_to_Dev()
 
@@ -353,20 +407,61 @@ def map_pd_to_vd_with_storcli():
 			PD_to_VD_Map.append([i, e, s, map_vd_dev[VD_to_PD_Map[VD]["scsi_naa_id"]], WWN.lower(), Mfg_Id, Model, Serial, VD, VD_to_PD_Map[VD]["scsi_naa_id"]])
 
 	Debug("map_pd_to_vd_with_storcli():: PD_to_VD_Map = " + str(PD_to_VD_Map))
-
-	Debug("map_pd_to_vd_with_storcli():: Function exit")
+	Debug("map_pd_to_vd_with_storcli():: function exit")
 
 	return(PD_to_VD_Map)
+
+
+def map_intermediate_SAS_to_WWN_with_storcli():
+	"""
+        Return a map of SAS to WWN using the LSI "storcli" utility.
+	"""
+
+	Debug("map_intermediate_SAS_to_WWN_with_storcli():: function entry")
+
+	Map = {}
+
+	STORCLI_BIN = Bin_Requires("storcli64")
+
+	if STORCLI_BIN is None:
+		print("INFO: The LSI 'storcli64' utility was not found.")
+		return(Map)
+
+	output_storcli = SysExec(STORCLI_BIN + " /cALL/eALL/sALL show all")
+
+	wwn = ""
+	sas = ""
+
+	for line in output_storcli.splitlines():
+
+		if re.search("^WWN", line):
+			wwn = line.split("=")[1].strip().lower()
+			wwn = re.sub("^0x", "", wwn)
+
+		if re.search(" Active ", line):
+			sas = line.strip().split()[-1]
+			sas = re.sub("^0x", "", sas)
+
+		if wwn and sas:
+
+			Debug("map_intermediate_SAS_to_WWN_with_storcli():: Map[ " + wwn + " ] = " + sas)
+			Map[wwn] = sas
+
+			wwn = ""
+			sas = ""
+
+	Debug("map_intermediate_SAS_to_WWN_with_storcli():: function entry")
+
+	return(Map)
 
 
 def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 	"""
-	This will return a mapping the intermediate SAS to WWN addreses using sas2ircu which is
-	necessary for the LSI_Falcon HBA controllers.
+        Return a map of SAS to WWN using the LSI "sas2ircu" utility.
 	"""
 
-	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() entry")
+	Debug("map_intermediate_SAS_to_WWN_with_sas2ircu():: function entry")
 
 	Map = {}
 
@@ -374,7 +469,7 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 
 	if SAS2IRCU_BIN is None:
 		print("INFO: The LSI 'sas2ircu' utility was not found.  Mapping drives to enclosure/slot will be disabled on Chenbro chassis.")
-		return Map
+		return(Map)
 
 	val_device = None
 	val_sas    = None
@@ -410,25 +505,26 @@ def map_intermediate_SAS_to_WWN_with_sas2ircu():
 			val_wwn       = None
 
 	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu(): Map = " + str(Map))
-	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() exit")
+	Debug("map_intermediate_SAS_to_WWN_with_sas2ircu():: function exit")
 
-	return Map
+	return(Map)
+
 
 def map_intermediate_SAS_to_WWN_with_MegaCli():
 
         """
-        Return a map of SAS to WWN using the LSI MegaCLI utility.  This is necessary for cards
-        using our 2nd generation HBA controller ("LSI_Thunderbolt")
+        Return a map of SAS to WWN using the LSI "MegaCLI" utility.
         """
 
-        Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() entry")
+        Debug("map_intermediate_SAS_to_WWN_with_MegaCli():: function entry")
 
         Map = {}
 
         MEGACLI_BIN = Bin_Suggests("MegaCli64")
         if MEGACLI_BIN is None:
         #        print("INFO: The LSI 'MegaCli64' utility was not found.  Mapping drives to enclosure/slot might not work.")
-                return Map
+                Debug("map_intermediate_SAS_to_WWN_with_MegaCli():: function exit")
+                return(Map)
 
         val_wwn = None
         val_sas = None
@@ -467,20 +563,26 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
                         val_sas = None
 
         Debug("def map_intermediate_SAS_to_WWN_with_Megacli():: Map = " + str(Map))
-        Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() exit")
+        Debug("map_intermediate_SAS_to_WWN_with_MegaCli():: function exit")
 
-        return Map
+        return(Map)
 
 
 def dict_VD_to_PD():
+
 	"""
 	Return a simple dict of virtual disk wwn -> physical disk wwn
 	"""
+
+	Debug("dict_VD_to_PD():: function entry")
 
 	Dict_VD_to_PD = {}
 
 	for i in map_pd_to_vd_with_storcli():
 		Dict_VD_to_PD[i[9]] = hex(int(i[4], 16) + 1).split("x")[1].lower()
+
+	Debug("dict_VD_to_PD():: Dict_VD_to_PD = " + str(Dict_VD_to_PD))
+	Debug("dict_VD_to_PD():: function exit")
 
 	return(Dict_VD_to_PD)
 
@@ -490,12 +592,15 @@ def dict_ES_to_Serial():
 	Return a simple dict of E:S -> Serial # for virtual disks since they obscure the actual serial #
 	"""
 
+	Debug("dict_ES_to_Serial():: function entry")
+
 	Dict_ES_to_Serial = {}
 
 	for i in map_pd_to_vd_with_storcli():
 		Dict_ES_to_Serial[i[0]] = i[7]
 
 	Debug("dict_ES_to_Serial():: Map = " + str(Dict_ES_to_Serial))
+	Debug("dict_ES_to_Serial():: function exit")
 
 	return(Dict_ES_to_Serial)
 
@@ -504,6 +609,8 @@ def List_BlockDevices():
 	"""
 	List block devices (hard drives, ssd's, nvme's, etc) visible to the OS
 	"""
+
+	Debug("List_BlockDevices():: function entry")
 
 	Block_Devs = [ "/dev/" + s for s in os.listdir("/sys/block")]
 
@@ -530,14 +637,19 @@ def List_BlockDevices():
 		Filtered_Block_Devs.append(i)
 
 	Debug("Block_Devs = " + str(Filtered_Block_Devs))
+	Debug("List_BlockDevices():: function exit")
 
 	return(Filtered_Block_Devs)
 
 
 def List_Slots(e):
+
 	"""
 	List the available slots on this enclosure
 	"""
+
+	Debug("List_Slots():: function entry")
+
 	### Get the number of slots for this enclosure
 	slots_list_cmd = SysExec("sg_ses --page=aes " + e)
 	slots = []
@@ -551,11 +663,13 @@ def List_Slots(e):
 		slots.append(l.split(":")[1].strip().split(" ")[0])
 
 	Debug("List_Slots:: slots for enclosure " + e + " = " + str(slots))
+	Debug("List_Slots():: function exit")
 
 	return(slots)
 
 
 def GetLocateLEDState(This_Backplane, This_Slot):
+
         """
         This function returns the state of the Locate LED on the given backplane/slot
         """
@@ -568,10 +682,11 @@ def GetLocateLEDState(This_Backplane, This_Slot):
         if This_LedState == "0":
                 LedState_Descr = "Off"
 
-        return LedState_Descr
+        return(LedState_Descr)
 
 
 def findRawSize(SD_Device):
+
 	"""
 	Fetch raw device size (in bytes) by multiplying "/sys/block/DEV/queue/hw_sector_size"
 	by /sys/block/DEV/size
@@ -588,7 +703,7 @@ def findRawSize(SD_Device):
 	if os.path.isfile(tfile):
 		secsize = SysExec("cat " + tfile).strip()
 
-	return int(numsec) * int(secsize)
+	return(int(numsec) * int(secsize))
 
 
 def HumanFriendlyBytes(bytes, scale, decimals):
@@ -602,11 +717,11 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	AcceptableScales = [ 1000, 1024 ]
 
 	if not scale in AcceptableScales:
-		return "ERR_BAD_SCALE"
+		return("ERR_BAD_SCALE")
 
 	# For removable media like dvd's
 	if bytes == 0:
-		return "Empty"
+		return("Empty")
 
 	unit_i = int(math.floor(math.log(bytes, scale)))
 
@@ -625,6 +740,7 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 
 
 def HumanFriendlyVendor(Vendor, Model):
+
 	"""
 	Return the Vendor string for the media (Seagate, Hitachi, etc.)
 	Note that this isn't as straightforward as you'd hope because
@@ -698,7 +814,7 @@ def HumanFriendlyVendor(Vendor, Model):
 	if Vendor == "ATAPI" or Vendor == "ATA":
 		Vendor = "unknown"
 
-	return Vendor.strip()
+	return(Vendor.strip())
 
 
 def HumanFriendlyModel(Vendor, Model):
@@ -709,7 +825,6 @@ def HumanFriendlyModel(Vendor, Model):
 	many vendors are quite loose with the standards  This is meant to be
 	human-friendly, and you should always use the raw query instead when
 	trying to match something.
-
 	"""
 
 	# udev likes to use underscores instead of spaces, so change that here.
@@ -768,10 +883,11 @@ def HumanFriendlyModel(Vendor, Model):
 	if Model.startswith("ATAPI"):
 		Model = re.sub("^ATAPI", "", Model)
 
-	return Model.strip()
+	return(Model.strip())
 
 
 def HumanFriendlySerial(Serial, Vendor, Model):
+
 	"""
 	Try to de-crapify the Serial Number (again, polluted with other fields)
 	"""
@@ -781,7 +897,7 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 	NO_SERIAL = "NO_SERIAL"
 
 	if Serial == Model:
-		return NO_SERIAL
+		return(NO_SERIAL)
 
 	Serial = Serial.split("_")[-1]
 
@@ -800,9 +916,10 @@ def HumanFriendlySerial(Serial, Vendor, Model):
 
 #	Debug("HumanFriendlySerial():: End Serial = " + str(Serial))
 
-	return Serial
+	return(Serial)
 
 def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
+
 	"""
 	The HBA/backplane/drive stack seemingly randomly returns either the human-visble
 	serial num on the drive label, or the "05" SATA/SAS serial.   I want to standardize
@@ -848,7 +965,7 @@ def standardize_Serial(SCSI_IDENT_SERIAL, ID_SCSI_SERIAL):
 
 #	Debug("standardize_Serial():: Final serial = " + str(HR_Serial) + " and "  + str(HBA_Serial))
 
-	return (HR_Serial, HBA_Serial)
+	return(HR_Serial, HBA_Serial)
 
 
 #####################################################################################
@@ -862,25 +979,29 @@ UDEVADM_BIN = Bin_Requires("udevadm")
 SMARTCTL_BIN = Bin_Requires("smartctl")
 
 Controller = Get_SASController()
+
 for i in Controller:
 
-	# For Falcon controllers, we need an assist from sas2ircu to map SATA drives to backplane/slot
-	if re.search("Falcon", i):
-		fal_map = map_intermediate_SAS_to_WWN_with_sas2ircu()
-		Falcon = True
+	Controller_Type = Get_SASController_ExecType(i)
 
-	# For Thunderbolt/Invader, we need MegaCLI
-	if re.search("Thunderbolt", i) or re.search("Invader", i):
-		thu_map = map_intermediate_SAS_to_WWN_with_MegaCli()
-		Thunderbolt = True
+	Debug("main():: Controller_Type == " + str(Controller_Type))
+
+	if Controller_Type == "sas2ircu":
+                sas2ircu_map = map_intermediate_SAS_to_WWN_with_sas2ircu()
+
+	if Controller_Type == "megacli":
+                megacli_map = map_intermediate_SAS_to_WWN_with_MegaCli()
+
+	if Controller_Type == "storcli":
+                storcli_map = map_intermediate_SAS_to_WWN_with_storcli()
 
 enclosures = Get_Enclosure_Info()
-Debug("enclosures = " + str(enclosures))
+Debug("main():: enclosures = " + str(enclosures))
 
 map_enclosure_sgdev_to_alias = {}
 for i in enclosures:
 	map_enclosure_sgdev_to_alias[i[0]] = i[4]
-Debug("map_enclosure_sgdev_to_alias = " + str(map_enclosure_sgdev_to_alias))
+Debug("main():: map_enclosure_sgdev_to_alias = " + str(map_enclosure_sgdev_to_alias))
 
 #map_enclosure_e_to_alias = {}
 #for i in enclosures:
@@ -892,7 +1013,7 @@ Debug("map_enclosure_sgdev_to_alias = " + str(map_enclosure_sgdev_to_alias))
 map_enclosure_e_to_sgdev = {}
 for i in enclosures:
 	map_enclosure_e_to_sgdev[i[2].split(":")[2]] = i[0]
-Debug("map_enclosure_e_to_sgdev = " + str(map_enclosure_e_to_sgdev))
+Debug("main():: map_enclosure_e_to_sgdev = " + str(map_enclosure_e_to_sgdev))
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
 sg_ses_dict = {}
@@ -935,7 +1056,7 @@ if enclosures:
 					else:
 						sg_ses_dict[e][s]["media_type"] = "Unknown"
 				if re.search("SAS address:", line) and not re.search("attached SAS address", line):
-						sg_ses_dict[e][s]["media_wwn"] = line.split(":")[1].strip()
+						sg_ses_dict[e][s]["media_wwn"] = re.sub("^0x", "", line.split(":")[1].strip())
 
 			# Parse the "ed" page
 			sg_ses_output = SysExec("sg_ses -p ed --index=" + s + " " + e)
@@ -974,7 +1095,7 @@ if enclosures:
 
 					sg_ses_dict[e][s][key] = val_txt
 
-Debug("sg_ses_dict = " + str(sg_ses_dict))
+			Debug("main():: sg_ses_dict[" + e + "][" + s + "] = " + str(sg_ses_dict[e][s]))
 
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
@@ -1024,13 +1145,18 @@ for bd in blockdevs:
 
 		udevadm_dict[bd][key] = val
 
+#		Debug("main():: udevadm_dict[" + bd + "][" + key + "] = " + val)
+
+
 sorted_keys = sorted(udevadm_dict.keys())
 udevadm_dict = {key:udevadm_dict[key] for key in sorted_keys}
 
-#Debug("Main:: udevadm_dict = " + str(udevadm_dict))
-
 ### Now we want to iterate over and simplify/clarify a few things
 for bd in udevadm_dict:
+
+	before_dict = dict(udevadm_dict[bd])
+
+#	Debug("main():: pre-scrubbed  udevadm_dict[" + bd + "] = " + str(udevadm_dict[bd]))
 
 	if "ID_VENDOR" in udevadm_dict[bd] and not "SCSI_VENDOR" in udevadm_dict[bd]:
 		udevadm_dict[bd]["SCSI_VENDOR"] = udevadm_dict[bd]["ID_VENDOR"]
@@ -1128,6 +1254,14 @@ for bd in udevadm_dict:
 	if udevadm_dict[bd]["SCSI_VENDOR"] == "WDC":
 		udevadm_dict[bd]["SCSI_IDENT_SERIAL"] = re.sub("^WD-", "", udevadm_dict[bd]["SCSI_IDENT_SERIAL"])
 
+#	Debug("main():: post-scrubbed udevadm_dict[" + bd + "] = " + str(udevadm_dict[bd]))
+
+	after_dict = dict(udevadm_dict[bd])
+
+	diff_keys = after_dict.keys() - before_dict.keys()
+	diff_dict={k:after_dict[k] for k in diff_keys}
+
+	Debug("main:: diff_dict   = " + str(diff_dict))
 
 ### Remove all entries except the ones in the whitelist
 tmp = {}
@@ -1138,7 +1272,12 @@ for bd in udevadm_dict:
 			tmp[bd][key] = udevadm_dict[bd][key]
 		else:
 			tmp[bd][key] = ""
+
+#		Debug("main():: whitelisted udevadm_dict[" + bd + "] = " + str(udevadm_dict[bd]))
+
 udevadm_dict = tmp
+
+
 
 ##############################################################################
 ### Join sg_ses_dict to udevadm_dict
@@ -1147,22 +1286,62 @@ sd_to_sg_map = map_sd_to_sg()
 
 for bd in udevadm_dict:
 
+	before_dict = dict(udevadm_dict[bd])
+
+	# Add the SG Dev from the sd_to_sg_map
+	if bd in sd_to_sg_map:
+		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
+	else:
+		udevadm_dict[bd]["SG_DEV"]    = "None"
+
 	# This is result on drives attached via SATA, NVME, and other non-enclosure topologies
 	search = "unknown"
 
+	# Get WWN map using sas2irc
+	if Controller_Type == "sas2ircu":
+		if "ID_WWN" in udevadm_dict[bd]:
+			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
+			if st in sas2ircu_map:
+				search = sas2ircu_map[st]
+
+#	Debug("main():: search 1 = " + str(search))
+
+	# Get WWN map using MegaCLI
+	if Controller_Type == "megacli":
+		if "ID_WWN" in udevadm_dict[bd]:
+			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
+			if st in megacli_map:
+				search = megacli_map[st]
+
+#	Debug("main():: search 2 = " + str(search))
+
+	# Get WWN map using storcli
+	if Controller_Type == "storcli":
+		if "ID_WWN" in udevadm_dict[bd]:
+			st = udevadm_dict[bd]["ID_WWN"]
+			st = hex(int(st, 16) - 3)
+			st = re.sub("0x", "", st)
+			if st in storcli_map:
+				search = storcli_map[st]
+
+#	Debug("main():: search 3 = " + str(search))
+
 	# Find the search term to match with the sg_ses_dict
-	if "SCSI_IDENT_PORT_NAA_REG" in udevadm_dict[bd]:
+	if search == "unknown" and "SCSI_IDENT_PORT_NAA_REG" in udevadm_dict[bd]:
 		if re.search("^5", udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]):
 			search = udevadm_dict[bd]["SCSI_IDENT_PORT_NAA_REG"]
+
+#	Debug("main():: search 4 = " + str(search))
 
 	if search == "unknown" and "SCSI_IDENT_SERIAL" in udevadm_dict[bd]:
 		if re.search("^5", udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) and len(udevadm_dict[bd]["SCSI_IDENT_SERIAL"]) == 32:
 			# We want to subtract 2 from whatever value is here
 			search = udevadm_dict[bd]["SCSI_IDENT_SERIAL"]
-			print("DEBUG:  search = " + str(search))
-
+			Debug("main():: search = " + str(search))
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
+
+#	Debug("main():: search 5 = " + str(search))
 
 	if search == "unknown" and "ID_SERIAL_SHORT" in udevadm_dict[bd]:
 		if re.search("^5", udevadm_dict[bd]["ID_SERIAL_SHORT"]) and len(udevadm_dict[bd]["ID_SERIAL_SHORT"]) == 32:
@@ -1171,25 +1350,15 @@ for bd in udevadm_dict:
 			search = hex(int(search, 16) - 2)
 			search = re.sub("^0x", "", search)
 
-	# Get WWN map using sas2irc
-	if "Falcon" in vars():
-		if "ID_WWN" in udevadm_dict[bd]:
-			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
-			if st in fal_map:
-				search = fal_map[st]
-
-	# Get WWN map using MegaCLI
-	if "Thunderbolt" in vars():
-		if "ID_WWN" in udevadm_dict[bd]:
-			st = re.sub("0x", "", udevadm_dict[bd]["ID_WWN"])
-			if st in thu_map:
-				search = thu_map[st]
+	Debug("main():: search 6 = " + str(search))
 
 	# If there are no enclosures, there's nothing to map to sg_ses...
 	if search != "unknown" and enclosures:
 		for e in sg_ses_dict:
 			for s in sg_ses_dict[e]:
-				if sg_ses_dict[e][s]["media_wwn"] == "0x" + search:
+				if sg_ses_dict[e][s]["media_wwn"] == "0x" + search or sg_ses_dict[e][s]["media_wwn"] == search:
+#					Debug("Foobar e = " + e + " s = " + s + " sg_ses_dict = " + str(sg_ses_dict[e][s]))
+#					Debug("Foobar comparing " + sg_ses_dict[e][s]["media_wwn"] + " against " + "0x" + search)
 					udevadm_dict[bd].update(sg_ses_dict[e][s])
 					break
 	else:
@@ -1201,7 +1370,7 @@ for bd in udevadm_dict:
                               "s_ident":    "None"}
 		udevadm_dict[bd].update(null_dict)
 
-	Debug("s_ident for bd " + str(bd) + " = " + str(udevadm_dict[bd]["s_ident"]))
+#	Debug("main():: s_ident for bd 1 " + str(bd) + " = " + str(udevadm_dict[bd]["s_ident"]))
 
 	udevadm_dict[bd]["DISK_SIZE"] = HumanFriendlyBytes(findRawSize(bd), 1000, 0)
 
@@ -1217,35 +1386,33 @@ for bd in udevadm_dict:
 
 		if bd in map_tmp_enclosure:
 			udevadm_dict[bd]["enclosure"] = map_enclosure_e_to_sgdev[map_tmp_enclosure[bd]]
-			Debug("enclosure = " + str(udevadm_dict[bd]["enclosure"]))
+			Debug("main():: enclosure = " + str(udevadm_dict[bd]["enclosure"]))
 
 		if bd in map_tmp_slot:
 			udevadm_dict[bd]["slot"]      = map_tmp_slot[bd]
-			Debug("slot = " + udevadm_dict[bd]["slot"])
+			Debug("main():: slot = " + udevadm_dict[bd]["slot"])
+
+	if bd in udevadm_dict and "s_ident" in udevadm_dict[bd]:
+		Debug("main():: s_ident for bd 2 " + str(bd) + " = " + str(udevadm_dict[bd]["s_ident"]))
 
 	udevadm_dict[bd]["Enclosure_Alias"] = "None"
-	if udevadm_dict[bd]["enclosure"] in map_enclosure_sgdev_to_alias:
-		udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_sgdev_to_alias[udevadm_dict[bd]["enclosure"]]
+	if "enclosure" in udevadm_dict[bd]:
+		if udevadm_dict[bd]["enclosure"] in map_enclosure_sgdev_to_alias:
+			udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_sgdev_to_alias[udevadm_dict[bd]["enclosure"]]
 
-
-	if udevadm_dict[bd]["enclosure"] != "None":
+	if "enclosure" in udevadm_dict[bd]:
+		if udevadm_dict[bd]["enclosure"] != "None":
 #		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][str(int(udevadm_dict[bd]["slot"]) - 1)]["s_ident"]
 
 		# The offset has to be changed on a per-card basis.  :-/
-		udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 1)
-		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][udevadm_dict[bd]["slot"]]["s_ident"]
+			udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 0)
+			udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][udevadm_dict[bd]["slot"]]["s_ident"]
 
 
 #	if udevadm_dict[bd]["enclosure"] in map_enclosure_e_to_alias:
 #		udevadm_dict[bd]["Enclosure_Alias"] = map_enclosure_e_to_alias[udevadm_dict[bd]["enclosure"]]
 
 # sg_ses_dict[e][s]["s_ident"] = val_txt
-
-
-	if bd in sd_to_sg_map:
-		udevadm_dict[bd]["SG_DEV"]    = sd_to_sg_map[bd]
-	else:
-		udevadm_dict[bd]["SG_DEV"]    = "None"
 
 	if re.search("/dev/nvme", bd):
 		udevadm_dict[bd]["SG_DEV"]    = "None"
@@ -1256,15 +1423,24 @@ for bd in udevadm_dict:
 	# This model lies about its size
 	if udevadm_dict[bd]["ID_MODEL"] == "ST8000NM0065":
 		udevadm_dict[bd]["DISK_SIZE"] = "8 TB"
-# PARTON
-#for bd in udevadm_dict:
-#	udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 1)
 
-Debug("udevadm_dict = " + str(udevadm_dict))
+	after_dict = dict(udevadm_dict[bd])
+
+	diff_keys = after_dict.keys() - before_dict.keys()
+	diff_dict={k:after_dict[k] for k in diff_keys}
+
+	Debug("main:: wl diff_dict   = " + str(diff_dict))
+
+
+Debug("main():: udevadm_dict = " + str(udevadm_dict))
+
+
 
 ##############################################################################
 ### PrettyPrint the dict and exit
 ##############################################################################
+
+#def PrettyPrint(Dict_To_Print, PrettyNames_Dict):
 
 # Rename these columns to something human-readible when we print
 pretty_name = {

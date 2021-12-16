@@ -880,6 +880,8 @@ if enclosures:
 
 					sg_ses_dict[e][s][key] = val_txt
 
+			Debug("main():: e" + e + " s" + s + "sg_ses_dict = " + str(sg_ses_dict[e][s]))
+
 
 # Blank dictionary to hold parsed output from the "sg_ses" command
 udevadm_dict = {}
