@@ -1470,7 +1470,7 @@ for bd in udevadm_dict:
 #		udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][str(int(udevadm_dict[bd]["slot"]) - 1)]["s_ident"]
 
 		# The offset has to be changed on a per-card basis.  :-/
-			udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 0)
+			udevadm_dict[bd]["slot"] = str(int(udevadm_dict[bd]["slot"]) - 1)
 			udevadm_dict[bd]["s_ident"] = sg_ses_dict[udevadm_dict[bd]["enclosure"]][udevadm_dict[bd]["slot"]]["s_ident"]
 
 
