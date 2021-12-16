@@ -238,6 +238,10 @@ def map_pd_to_vd_with_storcli():
 
 PD_to_VD_Map = map_pd_to_vd_with_storcli()
 
+if len(PD_to_VD_Map) == 0:
+	print("INFO:  No virtual disks found.")
+	sys.exit(0)
+
 x = PrettyTable(["E:S", "Enclosure", "Slot", "SD_Dev", "PD_WWN", "Serial", "VD", "VD_WWN"])
 x.padding_width = 1
 for row in PD_to_VD_Map:
