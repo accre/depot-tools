@@ -158,6 +158,64 @@ def SysExec(cmd):
         return(Return_Val)
 
 
+def PrettyPrint(Dict_To_Print, PrettyNames_Dict):
+
+        print_list  = PrettyNames_Dict.keys()
+        pretty_list = PrettyNames_Dict.values()
+
+        # Rename columns to their pretty_name equivalents
+        for bd in Dict_To_Print:
+                for o_key, n_key in PrettyNames_Dict.items():
+                        Dict_To_Print[bd][n_key] = Dict_To_Print[bd].pop(o_key)
+
+        # Measure the width of the column titles
+        ParamLength = {}
+        for bd, dict in Dict_To_Print.items():
+                for key, val in dict.items():
+                        if not key in pretty_list:
+                                continue
+                        ParamLength[key] = key.__len__()
+
+        # Measure the width of the data entries
+        for bd, dict in Dict_To_Print.items():
+                for key, val in dict.items():
+                        if not key in pretty_list:
+                                continue
+
+                        if isinstance(val, str):
+                                ValueLength = val.__len__()
+                        elif isinstance(val, int):
+                                ValueLength = math.log10(float(val) + 0.001)
+                                if ValueLength < 0:
+                                        ValueLength = 1
+                                ValueLength = int(math.floor(ValueLength))
+
+                        ParamLength[key] = max(ValueLength, ParamLength[key])
+
+        # Create a format statement of the appropriate length
+        TOTALLENGTH = 0
+        FORMAT=""
+        for param in ParamLength:
+                FORMAT = FORMAT + " %-" + str(ParamLength[param] + 2) + "s "
+                TOTALLENGTH = TOTALLENGTH + ParamLength[param] + 4
+        TOTALLENGTH = TOTALLENGTH - 2
+
+        # Print it and done...
+        print("")
+        print(FORMAT % tuple(pretty_list))
+        print("=" * TOTALLENGTH)
+
+        for bd, dict in Dict_To_Print.items():
+                printline = []
+                for key, val in dict.items():
+
+                        if not key in pretty_list:
+                                continue
+                        printline.append(val)
+                print(FORMAT % tuple(printline))
+        print("")
+
+
 def Get_SASController():
 
 	"""
@@ -1468,58 +1526,5 @@ pretty_name = {
 	"slot":              "Slot",     \
 	"s_ident":           "Locate_LED"
 }
-print_list  = pretty_name.keys()
-pretty_list = pretty_name.values()
 
-# Rename columns to their pretty_name equivalents
-for bd in udevadm_dict:
-	for o_key, n_key in pretty_name.items():
-		udevadm_dict[bd][n_key] = udevadm_dict[bd].pop(o_key)
-
-
-# Measure the width of the column titles
-ParamLength = {}
-for bd, dict in udevadm_dict.items():
-	for key, val in dict.items():
-		if not key in pretty_list:
-			continue
-
-		ParamLength[key] = key.__len__()
-
-# Measure the width of the data entries
-for bd, dict in udevadm_dict.items():
-	for key, val in dict.items():
-		if not key in pretty_list:
-			continue
-
-		if isinstance(val, str):
-			ValueLength = val.__len__()
-		elif isinstance(val, int):
-			ValueLength = math.log10(float(val) + 0.001)
-			if ValueLength < 0:
-				ValueLength = 1
-			ValueLength = int(math.floor(ValueLength))
-
-		ParamLength[key] = max(ValueLength, ParamLength[key])
-
-# Create a format statement of the appropriate length
-TOTALLENGTH = 0
-FORMAT=""
-for param in ParamLength:
-	FORMAT = FORMAT + " %-" + str(ParamLength[param] + 2) + "s "
-	TOTALLENGTH = TOTALLENGTH + ParamLength[param] + 4
-TOTALLENGTH = TOTALLENGTH - 2
-
-# Print it and done...
-print("")
-print(FORMAT % tuple(pretty_list))
-print("=" * TOTALLENGTH)
-
-for bd, dict in udevadm_dict.items():
-	printline = []
-	for key, val in dict.items():
-		if not key in pretty_list:
-			continue
-		printline.append(val)
-	print(FORMAT % tuple(printline))
-print("")
+PrettyPrint(udevadm_dict, pretty_name)
