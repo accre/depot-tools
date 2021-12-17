@@ -149,7 +149,6 @@ def parse_storcli_allvirtdrives():
 	output = SysExec("storcli64 /cALL/vALL show all")
 
 	parse_output = {}
-
 	# Pass 1:  Pluck out all the "key = val" lines and put them into a dict
 	for line in output.splitlines():
 
@@ -173,54 +172,27 @@ def parse_storcli_allvirtdrives():
 
 			parse_output[ces][key] = val
 
+	print("DEBUG:  parse_output = " + str(parse_output))
 
-	# Pass 2:  Parse this section:
-	#
-	# -----------------------------------------------------------------------------
-	# EID:Slt DID State DG      Size Intf Med SED PI SeSz Model            Sp Type
-	# -----------------------------------------------------------------------------
-	# 9:12     10 Onln   0 10.913 TB SAS  HDD N   N  512B ST12000NM0027    U  -
+	# Pass 2:  Parse physical disks that belong to virtual disks
+	PD_headers = [ "EID:Slt", "DID", "State", "DG", "Size", "Size_Units", "Intf", "Med", "SED", "PI", "SeSz", "Model", "Sp", "Type" ]
 
-	# EID:Slt == Enclosure Device ID:Slot No.
-	# DID = Device ID
-	# State = Drive State
-	# DG = DriveGroup
-	# Size = Size of Drive
-	# Intf = Interface (SAS, SATA, etc.)
-	# Med  = Media Type
-	# SED  = Self Encryptive Drive
-	# PI   = Protection Info
-	# SeSZ = Sector Size
-	# Model = Drive Model
-	# Sp   = Spun [(U)p, (D)own, etc]
-	# Type = ???
-	Drive_info_headers = [ "EID:Slt", "DID", "State", "DG", "Size", "Size_Units", "Intf", "Med", "SED", "PI", "SeSz", "Model", "Sp", "Type" ]
-
-	Drive = ""
-	Drive_info = {}
 	for line in output.splitlines():
 
-		if not re.search("Drive |:", line):
+		if re.search("=|PDs for VD|Properties|EID|Slt", line):
 			continue
 
-		if re.search("^Drive", line) and re.search(" - Detailed Information :| State:| Device attributes :| Policies/Settings :|position", line):
+		if not re.search("/c|:", line):
 			continue
 
-		if re.search("Port Information|EID:Slt|Drive Temperature|Inquiry Data", line):
-			continue
-
-		if re.search("Drive", line):
-			Drive = line.split()[1]
+		if re.search("/c", line):
+			VDrive = line.split()[0]
+			PDrives[VDrive] = {}
 		else:
-			tmp = line.split()
-			Drive_info = dict(zip([x.lower() for x in Drive_info_headers], tmp))
-
-		if Drive and Drive_info:
-			for key, val in Drive_info.items():
-				parse_output[Drive][key] = val
-
-			Drive = ""
-			Drive_info = {}
+			Dict = dict(zip([x.lower() for x in PD_headers], line.split()))
+			CES = Dict["EID:Slt"]
+			Dict.pop("EID:Slt")
+#			parse_output[ces]PDrives[VDrive][CES] = Dict
 
 
 	# Pass 3:  Parse this section:
