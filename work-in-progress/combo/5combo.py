@@ -250,6 +250,7 @@ def Get_SASController_ExecType(Controller):
 	# Need to rethink this.   I need to pass three things back:
 	#
 	# The Controller_type (sas2ircu, megacli, storcli)
+	# Path to current storcli/sas2ircu/MegaCLI binary
 	# A Map file (potentially for multiple controllers)
 	# An offset per controller
 
@@ -415,13 +416,19 @@ def map_pd_to_vd_with_storcli():
 
 	Debug("map_pd_to_vd_with_storcli():: function entry")
 
+	STORCLI_BIN = Bin_Requires("storcli64")
+
+	if STORCLI_BIN is None:
+		print("INFO: The LSI 'storcli64' utility was not found.  Cannot resolve vd <-> pd mapping.")
+		return()
+
 	map_vd_dev = map_WWN_to_Dev()
 
 	VD_to_PD_Map = {}
 	VD = []
 	scsi_naa_id = ""
 	PD = []
-	for line in SysExec("storcli64 /c0 /vall show all").splitlines():
+	for line in SysExec(STORCLI_BIN + " /cALL/vALL show all").splitlines():
 
 		if not re.search("/c0/|SCSI NAA| HDD ", line):
 			continue
@@ -454,7 +461,7 @@ def map_pd_to_vd_with_storcli():
 			e = i.split(":")[0]
 			s = i.split(":")[1]
 
-			for line in SysExec("storcli64 /c0/e" + str(e) + "/s" + str(s) + " show all").splitlines():
+			for line in SysExec(STORCLI_BIN + " /cALL/e" + str(e) + "/s" + str(s) + " show all").splitlines():
 
 				if re.search("^WWN", line):
 					WWN = line.split("=")[1].strip()
@@ -593,7 +600,7 @@ def map_intermediate_SAS_to_WWN_with_MegaCli():
         val_wwn = None
         val_sas = None
 
-        output_megacli = SysExec("MegaCli64 -PDList -aALL -NoLog")
+        output_megacli = SysExec(MEDACLI_BIN + " -PDList -aALL -NoLog")
 
         for line in output_megacli.splitlines():
 
@@ -797,8 +804,10 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	scaled_units = UNITS[unit_i]
 	scaled_size = round(bytes / math.pow(scale, unit_i), decimals)
 
-	return_str = str(scaled_size) + " " + scaled_units
-	return_str = re.sub(".0 ", " ", return_str)
+#	return_str = str(scaled_size) + " " + scaled_units
+#	return_str = re.sub(".0 ", " ", return_str)
+	return_str = str(scaled_size) + scaled_units
+	return_str = re.sub(".0", "", return_str)
 
 	return(return_str)
 
