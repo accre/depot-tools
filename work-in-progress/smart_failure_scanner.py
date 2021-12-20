@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import re
 import sys
 import time
 import math
-import multiprocessing
+import threading
 
 from subprocess import Popen, PIPE, STDOUT, call, check_output
 from time import gmtime, strftime, sleep
@@ -34,8 +34,10 @@ def SysExec(cmd):
         Run the given command and return the output
         """
 
-        # Cache the output of the command for 20 seconds
-        Cache_Expires = 20
+#        Debug("SysExec():: cmd = '" + cmd + "'")
+
+        # Cache the output of the command for the given number of seconds
+        Cache_Expires = 60
 
         # Computed once, used twice
         Cache_Keys = list(CacheDataArray.keys())
@@ -48,6 +50,7 @@ def SysExec(cmd):
 
         # If we have valid data cached, return it
         if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+#                Debug("Returning cmd from cache:  " + cmd)
                 Return_Val = CacheDataArray[cmd]
 
         # If the cmd is "cat", use fopen/fread/fclose to open it and
@@ -142,9 +145,7 @@ def findVendor(SD_Device):
 
 # Get a list of block devices
 Devs = []
-
 Output = os.listdir("/sys/block")
-
 for line in Output:
 
 	# Skip various non-block devices
@@ -155,10 +156,21 @@ for line in Output:
 
 Debug("Block devices found: " + str(Devs))
 
-# Iterate over all devices and look for SMART errors depending on what type of device (SATA, SAS, NVME, virtual disk) it is
+# SysExec() caches the output of all commands it runs.  Run "smartctl -a " on
+# all drives in parallel then wait for them to complete to speed up access later
+jobs = []
+for Dev in Devs:
+	Debug("Spawning SysExec 'smartctl -x' process on Dev " + Dev)
+	p = threading.Thread(target = SysExec, args = ("smartctl -x " + Dev, ))
+	jobs.append(p)
+	p.start()
 
-# Determine the drive transport (SAS, SAS, NVME, Virtual) for each disk, as each type requires a different method to parse
-# its SMART output
+Debug("Waiting for SysExec() jobs to complete...")
+for job in jobs:
+	job.join(30)
+
+
+# Determine the drive transport (SAS, SAS, NVME, Virtual) for each disk
 Drive_Transport = {}
 for Dev in Devs:
 
@@ -187,6 +199,8 @@ for Dev in Devs:
 
 	Debug("Drive transport for " + Dev + " is " + Drive_Transport[Dev])
 
+
+# Start iterating over Devs and searching for errors
 smart_attributes_headers = [ "id", "attribute_name", "flags", "value", "worst", "thresh", "fail", "raw_value" ]
 
 for Dev in Devs:
@@ -198,7 +212,7 @@ for Dev in Devs:
 
 			line = line.strip() # Remove leading spaces
 
-			Debug("Dev " + Dev + " " + line)
+#			Debug("Dev " + Dev + " " + line)
 
 			# SMART attribute lines all start with numbers (after stripping leading spaces)
 			if not re.search("^[0-9]", line):
@@ -214,13 +228,16 @@ for Dev in Devs:
 			if re.search("Not_testing", line):
 				continue
 
+			if re.search("% of test", line):
+				continue
+
 			if re.search("[0-9a-f][0-9a-f] [0-9a-f][0-9a-f] [0-9a-f][0-9a-f]", line):
 				continue
 
 			# At this point, the only thing left should be actual SMART attributes, so pluck them out
 			smart_attributes = dict(zip(smart_attributes_headers, line.split()))
 
-			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
+#			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
 
 			# This is a corner case where value, worst and thresh are all 0.  Just ignore
 			if smart_attributes["value"] == 0 and smart_attributes["worst"] == 0 and smart_attributes["thresh"] == 0:
@@ -247,25 +264,27 @@ for Dev in Devs:
 			if Delta < 10 and Delta > 0 and int(smart_attributes["thresh"]) < 50:
 				print("Dev " + Dev + " is marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
 
-		# Pass 2:  Scan smartctl output for <stuff>
+		# Pass 2:  Scan smartctl output for "Self-test execution status:"
+		out_array = enumerate(SysExec("smartctl -x " + Dev).splitlines())
+		for i, line in out_array:
+			if re.search("Self-test execution status:", line):
+				msg = line.split(")")[1]
+				msg_finished = False
+				while not msg_finished:
+					line = next(out_array)[1]
+					if re.search("^[a-zA-Z]", line):
+						msg_finished = True
+						msg = ' '.join(msg.split())
+					else:
+						msg = msg + line
 
-		if re.search("Self-test execution status:", line):
+				Debug("Self-test execution status: " + msg)
 
-			msg = line.split(")")[1]
-			while not msg_finished:
-				line = line.next()
-				if re.search("^[a-zA-Z]", line):
-					msg_finished = True
-				else:
-					msg = msg + line
+				if re.search("The previous self-test completed having the read element of the test failed", msg):
+					print("Dev " + Dev + " is failing a read-element test.")
 
-			Debug("Self-test execution status: " + msg)
-
-			if re.search("The previous self-test completed having the read element of the test failed", msg):
-				print("Dev " + Dev + " is failing a read-element test.")
-
-			if re.search("The previous self-test completed having a test element that failed", msg):
-				print("Dev " + Dev + " is failing a test-element test.")
+				if re.search("The previous self-test completed having a test element that failed", msg):
+					print("Dev " + Dev + " is failing a test-element test.")
 
 
 #	elif Drive_Transport[Dev] == "SAS":
