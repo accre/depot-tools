@@ -6,6 +6,7 @@ import sys
 import time
 import math
 import threading
+import socket
 
 from subprocess import Popen, PIPE, STDOUT, call, check_output
 from time import gmtime, strftime, sleep
@@ -20,16 +21,26 @@ Print_Debug = False
 # Do we want to be "Picky" or "Practical".
 # "Picky" sets reporting thresholds to 0, so a single error will report a message
 # "Practical" sets reporting thresholds to minimize minor messages
-Reports = "Picky"
+Reports = "Practical"
 
 if Reports == "Picky":
 	Thresh_197 = 0
 	Grown_Defect_Thresh = 0
-	Smart_Attribute_Thresh = 10
+	Smart_Attribute_Thresh = 0
+	total_read_thresh = 0
+	total_write_thresh = 0
+	read_correction_thresh = 0
+	write_correction_thresh = 0
+
 elif Reports == "Practical":
 	Thresh_197 = 500
-	Grown_Defect_Thresh = 4
+	Grown_Defect_Thresh = 10
 	Smart_Attribute_Thresh = 10
+	total_read_thresh = 10
+	total_write_thresh = 10
+	read_correction_thresh = 10
+	write_correction_thresh = 10
+
 
 def Debug(text):
 
@@ -174,9 +185,7 @@ def printDev(Dev, Str):
 	Size = re.sub("\.0", "", Size)
 	Size = re.sub(" ", "", Size)
 
-	print(Dev + " [" + Vendor + " " + Model + " " + Size + ", serial " + Serial + "] - " + Str)
-
-
+	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + " " + Size + ", serial " + Serial + "] - " + Str)
 
 
 ################################################################################
@@ -263,7 +272,7 @@ for Dev in Devs:
 			if re.search("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]", line):
 				continue
 
-			if re.search("Not_testing", line):
+			if re.search("Not_testing|Read_scanning was never started", line):
 				continue
 
 			if re.search("% of test", line):
@@ -272,9 +281,11 @@ for Dev in Devs:
 			if re.search("[0-9a-f][0-9a-f] [0-9a-f][0-9a-f] [0-9a-f][0-9a-f]", line):
 				continue
 
+			Debug("line = " + line)
+
 			# At this point, the only thing left should be actual SMART attributes, so pluck them out
 			smart_attributes = dict(zip(smart_attributes_headers, line.split()))
-#			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
+			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
 
 			# This is a corner case where value, worst and thresh are all 0.  Just ignore
 			if smart_attributes["value"] == "000" and smart_attributes["worst"] == "000" and smart_attributes["thresh"] == "000":
@@ -291,6 +302,10 @@ for Dev in Devs:
 			if smart_attributes["id"] == "197":
 				if int(smart_attributes["raw_value"]) > Thresh_197:
 					printDev(Dev, "197 Current_Pending_Sector value over " + str(Thresh_197))
+
+			# Don't report "9 Power_On_Hours" errors, we're gonna use them until they die...
+			if smart_attributes["id"] == "9":
+				continue
 
 			Delta = int(smart_attributes["value"]) - int(smart_attributes["thresh"])
 
@@ -359,24 +374,20 @@ for Dev in Devs:
 			if re.search("^read:", line):
 				total_read_uncorrected_errors = int(line.split()[-1])
 
-				total_read_thresh = 0
 				if total_read_uncorrected_errors > total_read_thresh:
 					printDev(Dev, "total read uncorrected errors > " + str(total_read_thresh) + " (" + str(total_read_uncorrected_errors) + " errors)")
 
 				read_correction_algorithm_invocations = int(line.split()[-3])
-				read_correction_thresh = 0
 				if read_correction_algorithm_invocations > read_correction_thresh:
 					printDev(Dev, "read correction algorithm invocations greater than > " + str(read_correction_thresh) + " (" + str(read_correction_algorithm_invocations) + " invocations)")
 
 			if re.search("^write:", line):
 				total_write_uncorrected_errors = int(line.split()[-1])
 
-				total_write_thresh = 0
 				if total_write_uncorrected_errors > total_write_thresh:
 					printDev(Dev, "total write uncorrected errors > " + str(total_write_thresh) + " (" + str(total_write_uncorrected_errors) + " errors)")
 
 				write_correction_algorithm_invocations = int(line.split()[-3])
-				write_correction_thresh = 0
 				if write_correction_algorithm_invocations > write_correction_thresh:
 					printDev(Dev, "write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
 
