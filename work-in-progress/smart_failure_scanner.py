@@ -15,7 +15,20 @@ CacheDataArray = {}
 CacheTimeArray = {}
 
 # Set "True" to print debugging info
-Print_Debug = True
+Print_Debug = False
+
+# Do we want to be "Picky" or "Practical".
+# "Picky" sets reporting thresholds to 0, so a single error will report a message
+# "Practical" sets reporting thresholds to minimize minor messages
+Reports = "Picky"
+
+if Reports == "Picky":
+	Thresh_197 = 0
+	
+elif Reports == "Practical":
+	Thresh_197 = 500
+
+
 
 def Debug(text):
 
@@ -25,16 +38,13 @@ def Debug(text):
 
         if Print_Debug:
                 print("DEBUG: " + text)
-        return
-
+        return()
 
 def SysExec(cmd):
 
         """
         Run the given command and return the output
         """
-
-#        Debug("SysExec():: cmd = '" + cmd + "'")
 
         # Cache the output of the command for the given number of seconds
         Cache_Expires = 60
@@ -50,7 +60,6 @@ def SysExec(cmd):
 
         # If we have valid data cached, return it
         if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-#                Debug("Returning cmd from cache:  " + cmd)
                 Return_Val = CacheDataArray[cmd]
 
         # If the cmd is "cat", use fopen/fread/fclose to open it and
@@ -71,7 +80,7 @@ def SysExec(cmd):
         if str(type(Return_Val)) == "<class 'bytes'>":
                 Return_Val = Return_Val.decode("utf-8")
 
-        return Return_Val
+        return(Return_Val)
 
 
 def HumanFriendlyBytes(bytes, scale, decimals):
@@ -97,7 +106,7 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	scaled_units = UNITS[unit_i]
 	scaled_size = round(bytes / math.pow(scale, unit_i), decimals)
 
-	return str(scaled_size) + " " + scaled_units
+	return(str(scaled_size) + " " + scaled_units)
 
 
 def findRawSize(SD_Device):
@@ -120,6 +129,7 @@ def findRawSize(SD_Device):
 
 	return int(numsec) * int(secsize)
 
+
 def findModel(SD_Device):
 
 	file = "/sys/block/" + SD_Device.split("/")[-1] + "/device/model"
@@ -127,7 +137,8 @@ def findModel(SD_Device):
 	model = f.read()
 	f.close()
 
-	return model
+	return(model.strip())
+
 
 def findVendor(SD_Device):
 
@@ -136,7 +147,16 @@ def findVendor(SD_Device):
 	vendor = f.read()
 	f.close()
 
-	return vendor
+	return(vendor.strip())
+
+def printDev(Dev, Str):
+
+	Model = findModel(Dev)
+	Vendor = findVendor(Dev)
+
+	print("Dev " + Dev + " " + Vendor + " " + Model + " " + Str)
+
+
 
 
 ################################################################################
@@ -212,8 +232,6 @@ for Dev in Devs:
 
 			line = line.strip() # Remove leading spaces
 
-#			Debug("Dev " + Dev + " " + line)
-
 			# SMART attribute lines all start with numbers (after stripping leading spaces)
 			if not re.search("^[0-9]", line):
 				continue
@@ -236,7 +254,6 @@ for Dev in Devs:
 
 			# At this point, the only thing left should be actual SMART attributes, so pluck them out
 			smart_attributes = dict(zip(smart_attributes_headers, line.split()))
-
 #			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
 
 			# This is a corner case where value, worst and thresh are all 0.  Just ignore
@@ -251,18 +268,18 @@ for Dev in Devs:
 			# Now test for bad drives
 
 			# This is a drive with a large number of failed sectors that isn't yet failing SMART
-			Thresh_197 = 500
 			if smart_attributes["id"] == "197":
-				if int(smart_attributes["value"]) > Thresh_197:
-					print("Dev " + Dev + " has a 197 Current_Pending_Sector value over " + Thresh_197)
+				if int(smart_attributes["raw_value"]) > Thresh_197:
+					printDev(Dev, "has a 197 Current_Pending_Sector value over " + str(Thresh_197))
 
 			Delta = int(smart_attributes["value"]) - int(smart_attributes["thresh"])
 
 			if Delta <= 0:
-				print("Dev " + Dev + " is failing on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+				printDev(Dev, "is failing on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
 
 			if Delta < 10 and Delta > 0 and int(smart_attributes["thresh"]) < 50:
-				print("Dev " + Dev + " is marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+				printDev(Dev, "is marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+
 
 		# Pass 2:  Scan smartctl output for "Self-test execution status:"
 		out_array = enumerate(SysExec("smartctl -x " + Dev).splitlines())
@@ -281,28 +298,70 @@ for Dev in Devs:
 				Debug("Self-test execution status: " + msg)
 
 				if re.search("The previous self-test completed having the read element of the test failed", msg):
-					print("Dev " + Dev + " is failing a read-element test.")
+					printDev(Dev, "is failing a read-element test.")
 
 				if re.search("The previous self-test completed having a test element that failed", msg):
-					print("Dev " + Dev + " is failing a test-element test.")
+					printDev(Dev, "is failing a test-element test.")
 
 
-#	elif Drive_Transport[Dev] == "SAS":
-#		Defects=`smart_attributes ${dev} | grep 9000_SAS_Grown_Defect_List | awk '{ print $2 }'`
-#
-#		if [ -n "${Defects}" ]; then
-#
-#			if [ "${Defects}" -gt "0" ]; then
-#
-#				if [ "${Defects}" -gt "50" ]; then
-#					printf "Dev %-9s Rid ${rid} has a critically-high number of defects (${Defects} defects)\n" ${dev}
-#				else
-#					printf "Dev %-9s Rid ${rid} has a non-zero number of defects (${Defects} defects)\n" ${dev}
-#				fi
-#			fi
-#		fi
-#
-#	fi
-#done
-#
-#rm -f ${attr} ${lsslot} ${lsblock} ${blkid}
+	elif Drive_Transport[Dev] == "SAS":
+
+		Defects = 0
+		Non_Medium_Errors = 0
+		Smart_Failing_Cmd = 0
+
+		for line in SysExec("smartctl -x " + Dev).splitlines():
+
+			if re.search("^SMART Health Status:", line):
+				smart_health_status = line.split(":")[1].strip()
+				if smart_health_status != "OK":
+					printDev(Dev, "has non-OK smart status " + smart_health_status)
+
+			if re.search("Elements in grown defect list", line):
+				Defects = int(line.split(":")[1].strip())
+
+				if Defects > 50:
+					printDev(Dev, "has a critically-high number of defects (" + str(Defects) + " defects)")
+				elif Defects > 0 and Defects <= 50:
+					printDev(Dev, "has a non-zero number of defects (" + str(Defects) + " defects)")
+
+			# This shows the error count due to non-medium problems like bad HBA, bad cable, etc.
+			# Disabled by default, but enable if you're trying to debug depots
+			#
+#			if re.search("^Non-medium error count", line):
+#				Non_Medium_Errors = int(line.split(":")[1].strip())
+#				if Non_Medium_Errors > 0:
+#					printDev(Dev, "has a non-zero number of Non-medium errors (" + str(Non_Medium_Errors) + " errors)")
+
+			if re.search("A mandatory SMART command failed", line):
+				printDev(Dev, "is failing mandatory SMART commands")
+
+
+			if re.search("^read:", line):
+				total_read_uncorrected_errors = int(line.split()[-1])
+
+				total_read_thresh = 0
+				if total_read_uncorrected_errors > total_read_thresh:
+					printDev(Dev, "has total read uncorrected errors > " + str(total_read_thresh) + " (" + str(total_read_uncorrected_errors) + " errors)")
+
+				read_correction_algorithm_invocations = int(line.split()[-3])
+				read_correction_thresh = 0
+				if read_correction_algorithm_invocations > read_correction_thresh:
+					printDev(Dev, "has read correction algorithm invocations greater than > " + str(read_correction_thresh) + " (" + str(read_correction_algorithm_invocations) + " invocations)")
+
+
+			if re.search("^write:", line):
+				total_write_uncorrected_errors = int(line.split()[-1])
+
+				total_write_thresh = 0
+				if total_write_uncorrected_errors > total_write_thresh:
+					printDev(Dev, "has total write uncorrected errors > " + str(total_write_thresh) + " (" + str(total_write_uncorrected_errors) + " errors)")
+
+				write_correction_algorithm_invocations = int(line.split()[-3])
+				write_correction_thresh = 0
+				if write_correction_algorithm_invocations > write_correction_thresh:
+					printDev(Dev, "has write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
+
+			if re.search("Failed in segment", line) and not "smart_segment" in globals():
+				printDev(Dev, "has SMART test failed in segment errors")
+				smart_segment = True
