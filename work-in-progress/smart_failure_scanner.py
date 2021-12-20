@@ -171,7 +171,7 @@ def printDev(Dev, Str):
 		Serial = Serial[0:8]
 
 	Size = HumanFriendlyBytes(findRawSize(Dev), 1000, 0)
-	Size = re.sub(".0", "", Size)
+	Size = re.sub("\.0", "", Size)
 	Size = re.sub(" ", "", Size)
 
 	print(Dev + " [" + Vendor + " " + Model + " " + Size + ", serial " + Serial + "] - " + Str)
@@ -189,7 +189,7 @@ Output = os.listdir("/sys/block")
 for line in Output:
 
 	# Skip various non-block devices
-	if re.search("^loop|^ram|^dm|^zram", line):
+	if re.search("^loop|^ram|^dm|^zram|^md|^sr", line):
 		continue
 
 	Devs.append("/dev/" + line)
