@@ -21,7 +21,7 @@ Print_Debug = False
 # Do we want to be "Picky" or "Practical".
 # "Picky" sets reporting thresholds to 0, so a single error will report a message
 # "Practical" sets reporting thresholds to minimize minor messages
-Reports = "Practical"
+Reports = "Picky"
 
 if Reports == "Picky":
 	Enable_Picky = True
