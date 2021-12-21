@@ -1,0 +1,19 @@
+'cms-depot36.vampire':	cms-depot36.vampire /dev/sdc [SEAGATE ST4000NM0023 4TB, serial Z1Z89A92] - SMART test failed in segment errors
+'cms-depot33.vampire':	cms-depot33.vampire /dev/sdy [SEAGATE ST12000NM0027 12TB, serial ZJV26C3F] - SMART test failed in segment errors
+'cms-depot51.vampire':	cms-depot51.vampire /dev/sdad [SEAGATE ST4000NM0023 4TB, serial Z1Z7FBH1] - SMART test failed in segment errors
+'cms-depot32.vampire':	cms-depot32.vampire /dev/sdn [SEAGATE ST12000NM0027 12TB, serial ZJV4E5XA] - SMART test failed in segment errors
+'cms-depot44.vampire':	cms-depot44.vampire /dev/sdl [SEAGATE ST4000NM0023 4TB, serial Z1Z7CW8A] - SMART test failed in segment errors
+'cms-depot38.vampire':	cms-depot38.vampire /dev/sdi [SEAGATE ST4000NM0023 4TB, serial Z1Z7TTRV] - SMART test failed in segment errors
+'cms-depot64.vampire':	cms-depot64.vampire /dev/sdae [SEAGATE ST8000NM0075 8TB, serial ZA16MFZF] - SMART test failed in segment errors
+'cms-depot70.vampire':	cms-depot70.vampire /dev/sdh [SEAGATE ST8000NM0075 8TB, serial ZA16GTJ9] - Invalid DWORD count = 10954185
+'cms-depot70.vampire':	cms-depot70.vampire /dev/sdh [SEAGATE ST8000NM0075 8TB, serial ZA16GTJ9] - Running disparity error count = 10623355
+'cms-depot70.vampire':	cms-depot70.vampire /dev/sdh [SEAGATE ST8000NM0075 8TB, serial ZA16GTJ9] - Loss of DWORD synchronization = 453
+'cms-depot73.vampire':	cms-depot73.vampire /dev/sdaf [SEAGATE ST12000NM0027 12TB, serial ZJV26FAP] - SMART test failed in segment errors
+'cms-depot79.vampire':	cms-depot79.vampire /dev/sdi [SEAGATE ST12000NM0027 12TB, serial ZJV27HVY] - SMART test failed in segment errors
+'cms-depot65.vampire':	cms-depot65.vampire /dev/sdn [SEAGATE ST8000NM0075 8TB, serial ZA16MVB6] - SMART test failed in segment errors
+'cms-depot86.vampire':	cms-depot86.vampire /dev/sdh [SEAGATE ST12000NM0027 12TB, serial ZJV514BX] - SMART test failed in segment errors
+'cms-depot88.vampire':	cms-depot88.vampire /dev/sdak [SEAGATE ST12000NM002G 12TB, serial ZTN0BHYM] - Loss of DWORD synchronization = 26245
+'cms-depot88.vampire':	cms-depot88.vampire /dev/sdak [SEAGATE ST12000NM002G 12TB, serial ZTN0BHYM] - Phy reset problem = 3952
+'cms-depot83.vampire':	cms-depot83.vampire /dev/sdm [SEAGATE ST12000NM0027 12TB, serial ZJV513XY] - SMART Health issues - FAILURE PREDICTION THRESHOLD EXCEEDED: ascq=0x75 [asc=5d, ascq=75]
+'cms-depot83.vampire':	cms-depot83.vampire /dev/sdm [SEAGATE ST12000NM0027 12TB, serial ZJV513XY] - Critically-high number of defects (633 defects)
+'cms-depot83.vampire':	cms-depot83.vampire /dev/sdm [SEAGATE ST12000NM0027 12TB, serial ZJV513XY] - SMART test failed in segment errors
