@@ -32,6 +32,11 @@ if Reports == "Picky":
 	total_write_thresh = 0
 	read_correction_thresh = 0
 	write_correction_thresh = 0
+	running_disparity_error_count_thresh = 0
+	invalid_dword_count_thresh = 0
+	loss_of_dword_synchronization_thresh = 0
+	phy_reset_problem_thresh = 0
+	SAS_Defect_Thresh = 0
 
 elif Reports == "Practical":
 	Enable_Picky = False
@@ -42,6 +47,12 @@ elif Reports == "Practical":
 	total_write_thresh = 10
 	read_correction_thresh = 10
 	write_correction_thresh = 10
+	running_disparity_error_count_thresh = 2
+	invalid_dword_count_thresh = 4
+	loss_of_dword_synchronization_thresh = 4
+	phy_reset_problem_thresh = 4
+	SAS_Defect_Thresh = 50
+
 
 def Debug(text):
 
@@ -421,9 +432,9 @@ for Dev in Devs:
 			if re.search("Elements in grown defect list", line):
 				Defects = int(line.split(":")[1].strip())
 
-				if Defects > 50:
+				if Defects > SAS_Defect_Thresh:
 					printDev(Dev, "Critically-high number of defects (" + str(Defects) + " defects)")
-				elif Defects > Grown_Defect_Thresh and Defects <= 50:
+				elif Defects > Grown_Defect_Thresh and Defects <= SAS_Defect_Thresh:
 					if Enable_Picky == True:
 						printDev(Dev, "Non-zero number of defects (" + str(Defects) + " defects)")
 
@@ -466,21 +477,20 @@ for Dev in Devs:
 
 			if re.search("Invalid DWORD count = ", line):
 				invalid_dword_count = int(line.split("=")[1].strip())
-				if invalid_dword_count > 4:
+				if invalid_dword_count > invalid_dword_count_thresh:
 					printDev(Dev, "Invalid DWORD count = " + str(invalid_dword_count))
 
 			if re.search("Running disparity error count = ", line):
 				running_disparity_error_count = int(line.split("=")[1].strip())
-				if running_disparity_error_count > 2:
+				if running_disparity_error_count > running_disparity_error_count_thresh:
 					printDev(Dev, "Running disparity error count = " + str(running_disparity_error_count))
 
 			if re.search("Loss of DWORD synchronization = ", line):
 				loss_of_dword_synchronization = int(line.split("=")[1].strip())
-				if loss_of_dword_synchronization > 4:
+				if loss_of_dword_synchronization > loss_of_dword_synchronization_thresh:
 					printDev(Dev, "Loss of DWORD synchronization = " + str(loss_of_dword_synchronization))
 
 			if re.search("Phy reset problem = ", line):
 				phy_reset_problem = int(line.split("=")[1].strip())
-				if phy_reset_problem > 4:
+				if phy_reset_problem > phy_reset_problem_thresh:
 					printDev(Dev, "Phy reset problem = " + str(phy_reset_problem))
-
