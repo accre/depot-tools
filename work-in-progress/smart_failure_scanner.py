@@ -348,8 +348,11 @@ for Dev in Devs:
 			if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line):
 				printDev(Dev, "SMART log errors detected, see smartctl -x output for more info")
 
-			if re.search("Short offline|Extended offline", line) and not re.search("Completed without error|Interrupted \(host reset\)", line):
+			if re.search("Short offline|Extended offline", line) and \
+                           not re.search("Completed without error|Interrupted \(host reset\)|Self-test routine in progress", line) and \
+                           not "dont_warn_smart_test" in globals():
 				printDev(Dev, "SMART test errors detected, see smartctl -x output for more info")
+				dont_warn_smart_test = True
 
 
 	elif Drive_Transport[Dev] == "SAS":
