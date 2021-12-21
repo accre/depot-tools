@@ -448,12 +448,12 @@ for Dev in Devs:
 
 			if re.search("Invalid DWORD count = ", line):
 				invalid_dword_count = int(line.split("=")[1].strip())
-				if invalid_dword_count != 0:
+				if invalid_dword_count > 2:
 					printDev(Dev, "Invalid DWORD count = " + str(invalid_dword_count))
 
 			if re.search("Running disparity error count = ", line):
 				running_disparity_error_count = int(line.split("=")[1].strip())
-				if running_disparity_error_count != 0:
+				if running_disparity_error_count > 2:
 					printDev(Dev, "Running disparity error count = " + str(running_disparity_error_count))
 
 			if re.search("Loss of DWORD synchronization = ", line):
