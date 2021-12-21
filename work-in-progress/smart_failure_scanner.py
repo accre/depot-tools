@@ -47,8 +47,8 @@ elif Reports == "Practical":
 	total_write_thresh = 10
 	read_correction_thresh = 10
 	write_correction_thresh = 10
-	running_disparity_error_count_thresh = 2
-	invalid_dword_count_thresh = 4
+	running_disparity_error_count_thresh = 20
+	invalid_dword_count_thresh = 20
 	loss_of_dword_synchronization_thresh = 20
 	phy_reset_problem_thresh = 4
 	SAS_Defect_Thresh = 50
