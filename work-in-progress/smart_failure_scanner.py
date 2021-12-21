@@ -275,7 +275,7 @@ for Dev in Devs:
 			if re.search("Not_testing|Read_scanning was never started", line):
 				continue
 
-			if re.search("% of test", line):
+			if re.search("% of test|%", line):
 				continue
 
 			if re.search("[0-9a-f][0-9a-f] [0-9a-f][0-9a-f] [0-9a-f][0-9a-f]", line):
