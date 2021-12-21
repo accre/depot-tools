@@ -24,6 +24,7 @@ Print_Debug = False
 Reports = "Practical"
 
 if Reports == "Picky":
+	Enable_Picky = True
 	Thresh_197 = 0
 	Grown_Defect_Thresh = 0
 	Smart_Attribute_Thresh = 0
@@ -33,6 +34,7 @@ if Reports == "Picky":
 	write_correction_thresh = 0
 
 elif Reports == "Practical":
+	Enable_Picky = False
 	Thresh_197 = 500
 	Grown_Defect_Thresh = 10
 	Smart_Attribute_Thresh = 10
@@ -399,7 +401,7 @@ for Dev in Devs:
 		for line in SysExec("smartctl -x " + Dev).splitlines():
 
 			if re.search("^SMART Health Status:", line):
-				smart_health_status = line.split(":")[1].strip()
+				smart_health_status = re.sub("^SMART Health Status:", "", line).strip()
 				if smart_health_status != "OK":
 					printDev(Dev, "non-OK smart status " + smart_health_status)
 
