@@ -410,3 +410,24 @@ for Dev in Devs:
 			if re.search("Failed in segment", line) and not "smart_segment" in globals():
 				printDev(Dev, "SMART test failed in segment errors")
 				smart_segment = True
+
+			if re.search("Invalid DWORD count = ", line):
+				invalid_dword_count = int(line.split("=")[1].strip())
+				if invalid_dword_count != 0:
+					printDev(Dev, "Invalid DWORD count = " + str(invalid_dword_count))
+
+			if re.search("Running disparity error count = ", line):
+				running_disparity_error_count = int(line.split("=")[1].strip())
+				if running_disparity_error_count != 0:
+					printDev(Dev, "Running disparity error count = " + str(running_disparity_error_count))
+
+			if re.search("Loss of DWORD synchronization = ", line):
+				loss_of_dword_synchronization = int(line.split("=")[1].strip())
+				if loss_of_dword_synchronization != 0:
+					printDev(Dev, "Loss of DWORD synchronization = " + str(loss_of_dword_synchronization))
+
+			if re.search("Phy reset problem = ", line):
+				phy_reset_problem = int(line.split("=")[1].strip())
+				if phy_reset_problem != 0:
+					printDev(Dev, "Phy reset problem = " + str(phy_reset_problem))
+
