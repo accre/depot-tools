@@ -254,6 +254,11 @@ smart_attributes_headers = [ "id", "attribute_name", "flags", "value", "worst", 
 
 for Dev in Devs:
 
+	# Reset Boolean tests each loop
+	dont_warn_smart_test = False
+	smart_segment = False
+	smart_log_errors_detected = False
+
 	if Drive_Transport[Dev] == "SATA":
 
 		# Pass 1:  SMART attribute values
@@ -345,15 +350,45 @@ for Dev in Devs:
 		# Pass 3:  Scan smartctl output for other stuff
 		for line in SysExec("smartctl -x " + Dev).splitlines():
 
-			if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line):
+			if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line) and not smart_log_errors_detected:
 				printDev(Dev, "SMART log errors detected, see smartctl -x output for more info")
+				smart_log_errors_detected = True
 
 			if re.search("Short offline|Extended offline", line) and \
                            not re.search("Completed without error|Interrupted \(host reset\)|Self-test routine in progress", line) and \
-                           not "dont_warn_smart_test" in globals():
+                           not dont_warn_smart_test:
 				printDev(Dev, "SMART test errors detected, see smartctl -x output for more info")
 				dont_warn_smart_test = True
 
+			if re.search("Number of Reallocated Logical Sectors", line):
+				num_reallocated_logical_sectors = int(line.split()[3])
+				if num_reallocated_logical_sectors != 0:
+					printDev(Dev, "Number of Reallocated Logical Sectors = " + str(num_reallocated_logical_sectors))
+
+			if re.search("Number of Mechanical Start Failures", line):
+				num_mechanical_start_failures = int(line.split()[3])
+				if num_mechanical_start_failures != 0:
+					printDev(Dev, "Number of Mechanical Start Failures = " + str(num_mechanical_start_failures))
+
+			if re.search("Number of Reported Uncorrectable Errors", line):
+				num_reported_uncorrectable_errors = int(line.split()[3])
+				if num_reported_uncorrectable_errors != 0:
+					printDev(Dev, "Number of Reported Uncorrectable Errors = " + str(num_reported_uncorrectable_errors))
+
+			if re.search("Number of Hardware Resets", line):
+				num_hardware_resets = int(line.split()[3])
+				if num_hardware_resets != 0:
+					printDev(Dev, "Number of Hardware Resets = " + str(num_hardware_resets))
+
+			if re.search("Number of ASR Events", line):
+				num_asr_events = int(line.split()[3])
+				if num_asr_events != 0:
+					printDev(Dev, "Number of ASR Events = " + str(num_asr_events))
+
+			if re.search("Number of Interface CRC Errors", line):
+				num_interface_crc_errors = int(line.split()[3])
+				if num_interface_crc_errors != 0:
+					printDev(Dev, "Number of Interface CRC Errors = " + str(num_interface_crc_errors))
 
 	elif Drive_Transport[Dev] == "SAS":
 
@@ -407,7 +442,7 @@ for Dev in Devs:
 				if write_correction_algorithm_invocations > write_correction_thresh:
 					printDev(Dev, "write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
 
-			if re.search("Failed in segment", line) and not "smart_segment" in globals():
+			if re.search("Failed in segment", line) and not smart_segment:
 				printDev(Dev, "SMART test failed in segment errors")
 				smart_segment = True
 
