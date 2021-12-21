@@ -198,7 +198,7 @@ Output = os.listdir("/sys/block")
 for line in Output:
 
 	# Skip various non-block devices
-	if re.search("^loop|^ram|^dm|^zram|^md|^sr", line):
+	if re.search("^loop|^ram|^dm|^zram|^md|^sr|^drbd|^vd", line):
 		continue
 
 	Devs.append("/dev/" + line)
@@ -272,7 +272,7 @@ for Dev in Devs:
 			if re.search("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]", line):
 				continue
 
-			if re.search("Not_testing|Read_scanning was never started", line):
+			if re.search("Not_testing|Read_scanning", line):
 				continue
 
 			if re.search("% of test|%", line):
@@ -286,6 +286,10 @@ for Dev in Devs:
 			# At this point, the only thing left should be actual SMART attributes, so pluck them out
 			smart_attributes = dict(zip(smart_attributes_headers, line.split()))
 			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
+
+
+			if smart_attributes["thresh"] == "---":
+				smart_attributes["thresh"] = "000"
 
 			# This is a corner case where value, worst and thresh are all 0.  Just ignore
 			if smart_attributes["value"] == "000" and smart_attributes["worst"] == "000" and smart_attributes["thresh"] == "000":
