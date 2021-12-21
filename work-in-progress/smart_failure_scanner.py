@@ -32,6 +32,11 @@ if Reports == "Picky":
 	total_write_thresh = 0
 	read_correction_thresh = 0
 	write_correction_thresh = 0
+	running_disparity_error_count_thresh = 0
+	invalid_dword_count_thresh = 0
+	loss_of_dword_synchronization_thresh = 0
+	phy_reset_problem_thresh = 0
+	SAS_Defect_Thresh = 0
 
 elif Reports == "Practical":
 	Enable_Picky = False
@@ -42,6 +47,12 @@ elif Reports == "Practical":
 	total_write_thresh = 10
 	read_correction_thresh = 10
 	write_correction_thresh = 10
+	running_disparity_error_count_thresh = 2
+	invalid_dword_count_thresh = 4
+	loss_of_dword_synchronization_thresh = 20
+	phy_reset_problem_thresh = 4
+	SAS_Defect_Thresh = 50
+
 
 def Debug(text):
 
@@ -320,10 +331,11 @@ for Dev in Devs:
 			Delta = int(smart_attributes["value"]) - int(smart_attributes["thresh"])
 
 			if Delta <= 0:
-				printDev(Dev, "failing on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+				printDev(Dev, "Failing on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
 
-			if Delta < Smart_Attribute_Thresh and Delta > 0 and int(smart_attributes["thresh"]) < 50:
-				printDev(Dev, "marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+			if Enable_Picky == True:
+				if Delta < Smart_Attribute_Thresh and Delta > 0 and int(smart_attributes["thresh"]) < 50:
+					printDev(Dev, "Marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
 
 
 		# Pass 2:  Scan smartctl output for "Self-test execution status:"
@@ -343,40 +355,50 @@ for Dev in Devs:
 				Debug("Self-test execution status: " + msg)
 
 				if re.search("The previous self-test completed having the read element of the test failed", msg):
-					printDev(Dev, "failing a read-element test.")
+					printDev(Dev, "Failing a read-element test.")
 
 				if re.search("The previous self-test completed having a test element that failed", msg):
-					printDev(Dev, "failing a test-element test.")
+					printDev(Dev, "Failing a test-element test.")
 
 		# Pass 3:  Scan smartctl output for other stuff
 		for line in SysExec("smartctl -x " + Dev).splitlines():
 
-			if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line) and not smart_log_errors_detected:
-				printDev(Dev, "SMART log errors detected, see smartctl -x output for more info")
-				smart_log_errors_detected = True
+			if Enable_Picky == True:
+
+				if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line) and not smart_log_errors_detected:
+					printDev(Dev, "SMART log errors detected, see smartctl -x output for more info")
+					smart_log_errors_detected = True
 
 			if re.search("Short offline|Extended offline", line) and \
-                           not re.search("Completed without error|Interrupted \(host reset\)|Self-test routine in progress", line) and \
+                           not re.search("Completed without error|Interrupted \(host reset\)|Self-test routine in progress|Aborted by host", line) and \
                            not dont_warn_smart_test:
 				printDev(Dev, "SMART test errors detected, see smartctl -x output for more info")
 				dont_warn_smart_test = True
 
-			if re.search("Number of Reallocated Logical Sectors", line):
-				num_reallocated_logical_sectors = int(line.split()[3])
-				if num_reallocated_logical_sectors != 0:
-					printDev(Dev, "Number of Reallocated Logical Sectors = " + str(num_reallocated_logical_sectors))
+			if Enable_Picky == True:
+
+				if re.search("Number of Reallocated Logical Sectors", line):
+					num_reallocated_logical_sectors = int(line.split()[3])
+					if num_reallocated_logical_sectors != 0:
+
+						# Skip a bad model
+						is_bad_model = (findModel(Dev) == "WDC WD4000F9YZ-0" and num_reallocated_logical_sectors == 200)
+
+						if not is_bad_model:
+							printDev(Dev, "Number of Reallocated Logical Sectors = " + str(num_reallocated_logical_sectors))
 
 			if re.search("Number of Mechanical Start Failures", line):
 				num_mechanical_start_failures = int(line.split()[3])
 				if num_mechanical_start_failures != 0:
 					printDev(Dev, "Number of Mechanical Start Failures = " + str(num_mechanical_start_failures))
 
-			if re.search("Number of Reported Uncorrectable Errors", line):
-				num_reported_uncorrectable_errors = int(line.split()[3])
-				if num_reported_uncorrectable_errors != 0:
-					printDev(Dev, "Number of Reported Uncorrectable Errors = " + str(num_reported_uncorrectable_errors))
 
 			if Enable_Picky == True:
+
+				if re.search("Number of Reported Uncorrectable Errors", line):
+					num_reported_uncorrectable_errors = int(line.split()[3])
+					if num_reported_uncorrectable_errors != 0:
+						printDev(Dev, "Number of Reported Uncorrectable Errors = " + str(num_reported_uncorrectable_errors))
 
 				if re.search("Number of Hardware Resets", line):
 					num_hardware_resets = int(line.split()[3])
@@ -405,15 +427,16 @@ for Dev in Devs:
 			if re.search("^SMART Health Status:", line):
 				smart_health_status = re.sub("^SMART Health Status:", "", line).strip()
 				if smart_health_status != "OK":
-					printDev(Dev, "non-OK smart status " + smart_health_status)
+					printDev(Dev, "SMART Health issues - " + smart_health_status)
 
 			if re.search("Elements in grown defect list", line):
 				Defects = int(line.split(":")[1].strip())
 
-				if Defects > 50:
-					printDev(Dev, "critically-high number of defects (" + str(Defects) + " defects)")
-				elif Defects > Grown_Defect_Thresh and Defects <= 50:
-					printDev(Dev, "non-zero number of defects (" + str(Defects) + " defects)")
+				if Defects > SAS_Defect_Thresh:
+					printDev(Dev, "Critically-high number of defects (" + str(Defects) + " defects)")
+				elif Defects > Grown_Defect_Thresh and Defects <= SAS_Defect_Thresh:
+					if Enable_Picky == True:
+						printDev(Dev, "Non-zero number of defects (" + str(Defects) + " defects)")
 
 			# This shows the error count due to non-medium problems like bad HBA, bad cable, etc.
 			# Disabled by default, but enable if you're trying to debug depots
@@ -424,27 +447,29 @@ for Dev in Devs:
 #					printDev(Dev, "non-zero number of Non-medium errors (" + str(Non_Medium_Errors) + " errors)")
 
 			if re.search("A mandatory SMART command failed", line):
-				printDev(Dev, "failing mandatory SMART commands")
+				printDev(Dev, "Failing mandatory SMART commands")
 
-			if re.search("^read:", line):
-				total_read_uncorrected_errors = int(line.split()[-1])
+			if Enable_Picky == True:
 
-				if total_read_uncorrected_errors > total_read_thresh:
-					printDev(Dev, "total read uncorrected errors > " + str(total_read_thresh) + " (" + str(total_read_uncorrected_errors) + " errors)")
+				if re.search("^read:", line):
+					total_read_uncorrected_errors = int(line.split()[-1])
 
-				read_correction_algorithm_invocations = int(line.split()[-3])
-				if read_correction_algorithm_invocations > read_correction_thresh:
-					printDev(Dev, "read correction algorithm invocations greater than > " + str(read_correction_thresh) + " (" + str(read_correction_algorithm_invocations) + " invocations)")
+					if total_read_uncorrected_errors > total_read_thresh:
+						printDev(Dev, "Total read uncorrected errors > " + str(total_read_thresh) + " (" + str(total_read_uncorrected_errors) + " errors)")
 
-			if re.search("^write:", line):
-				total_write_uncorrected_errors = int(line.split()[-1])
+					read_correction_algorithm_invocations = int(line.split()[-3])
+					if read_correction_algorithm_invocations > read_correction_thresh:
+						printDev(Dev, "Read correction algorithm invocations greater than > " + str(read_correction_thresh) + " (" + str(read_correction_algorithm_invocations) + " invocations)")
 
-				if total_write_uncorrected_errors > total_write_thresh:
-					printDev(Dev, "total write uncorrected errors > " + str(total_write_thresh) + " (" + str(total_write_uncorrected_errors) + " errors)")
+				if re.search("^write:", line):
+					total_write_uncorrected_errors = int(line.split()[-1])
 
-				write_correction_algorithm_invocations = int(line.split()[-3])
-				if write_correction_algorithm_invocations > write_correction_thresh:
-					printDev(Dev, "write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
+					if total_write_uncorrected_errors > total_write_thresh:
+						printDev(Dev, "Total write uncorrected errors > " + str(total_write_thresh) + " (" + str(total_write_uncorrected_errors) + " errors)")
+
+					write_correction_algorithm_invocations = int(line.split()[-3])
+					if write_correction_algorithm_invocations > write_correction_thresh:
+						printDev(Dev, "Write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
 
 			if re.search("Failed in segment", line) and not smart_segment:
 				printDev(Dev, "SMART test failed in segment errors")
@@ -452,21 +477,20 @@ for Dev in Devs:
 
 			if re.search("Invalid DWORD count = ", line):
 				invalid_dword_count = int(line.split("=")[1].strip())
-				if invalid_dword_count > 2:
+				if invalid_dword_count > invalid_dword_count_thresh:
 					printDev(Dev, "Invalid DWORD count = " + str(invalid_dword_count))
 
 			if re.search("Running disparity error count = ", line):
 				running_disparity_error_count = int(line.split("=")[1].strip())
-				if running_disparity_error_count > 2:
+				if running_disparity_error_count > running_disparity_error_count_thresh:
 					printDev(Dev, "Running disparity error count = " + str(running_disparity_error_count))
 
 			if re.search("Loss of DWORD synchronization = ", line):
 				loss_of_dword_synchronization = int(line.split("=")[1].strip())
-				if loss_of_dword_synchronization != 0:
+				if loss_of_dword_synchronization > loss_of_dword_synchronization_thresh:
 					printDev(Dev, "Loss of DWORD synchronization = " + str(loss_of_dword_synchronization))
 
 			if re.search("Phy reset problem = ", line):
 				phy_reset_problem = int(line.split("=")[1].strip())
-				if phy_reset_problem != 0:
+				if phy_reset_problem > phy_reset_problem_thresh:
 					printDev(Dev, "Phy reset problem = " + str(phy_reset_problem))
-
