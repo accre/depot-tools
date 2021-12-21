@@ -342,6 +342,15 @@ for Dev in Devs:
 				if re.search("The previous self-test completed having a test element that failed", msg):
 					printDev(Dev, "failing a test-element test.")
 
+		# Pass 3:  Scan smartctl output for other stuff
+		for line in SysExec("smartctl -x " + Dev).splitlines():
+
+			if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line):
+				printDev(Dev, "SMART log errors detected, see smartctl -x output for more info")
+
+			if re.search("Short offline|Extended offline", line) and not re.search("Completed without error|Interrupted \(host reset\)", line):
+				printDev(Dev, "SMART test errors detected, see smartctl -x output for more info")
+
 
 	elif Drive_Transport[Dev] == "SAS":
 
