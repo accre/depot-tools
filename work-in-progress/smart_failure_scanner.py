@@ -312,7 +312,7 @@ for Dev in Devs:
 			# This is a drive with a large number of failed sectors that isn't yet failing SMART
 			if smart_attributes["id"] == "197":
 				if int(smart_attributes["raw_value"]) > Thresh_197:
-					printDev(Dev, "197 Current_Pending_Sector value over " + str(Thresh_197))
+					printDev(Dev, "197 Current_Pending_Sector value over " + str(Thresh_197) + " (" + smart_attributes["raw_value"] + " sectors)")
 
 			# Don't report "9 Power_On_Hours" errors, we're gonna use them until they die...
 			if smart_attributes["id"] == "9":
