@@ -24,7 +24,6 @@ Print_Debug = False
 Reports = "Practical"
 
 if Reports == "Picky":
-	Enable_Picky = True
 	Thresh_197 = 0
 	Grown_Defect_Thresh = 0
 	Smart_Attribute_Thresh = 0
@@ -32,14 +31,8 @@ if Reports == "Picky":
 	total_write_thresh = 0
 	read_correction_thresh = 0
 	write_correction_thresh = 0
-	running_disparity_error_count_thresh = 0
-	invalid_dword_count_thresh = 0
-	loss_of_dword_synchronization_thresh = 0
-	phy_reset_problem_thresh = 0
-	SAS_Defect_Thresh = 0
 
 elif Reports == "Practical":
-	Enable_Picky = False
 	Thresh_197 = 500
 	Grown_Defect_Thresh = 10
 	Smart_Attribute_Thresh = 10
@@ -47,11 +40,6 @@ elif Reports == "Practical":
 	total_write_thresh = 10
 	read_correction_thresh = 10
 	write_correction_thresh = 10
-	running_disparity_error_count_thresh = 20
-	invalid_dword_count_thresh = 20
-	loss_of_dword_synchronization_thresh = 20
-	phy_reset_problem_thresh = 4
-	SAS_Defect_Thresh = 50
 
 
 def Debug(text):
@@ -200,6 +188,135 @@ def printDev(Dev, Str):
 	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + " " + Size + ", serial " + Serial + "] - " + Str)
 
 
+def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
+
+	if Vendor == "SEAGATE":
+		Serial = Serial[0:8]
+
+	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + ", serial " + Serial + "] - " + Str)
+
+
+
+def Get_SASController():
+
+	"""
+	Return the SAS controller model in this depot.
+	"""
+
+	Debug("Get_SASController():: function entry")
+
+	output_lspci = SysExec("lspci")
+
+	# Enumerate all HBA's on-board
+	SAS_Controller = [ ]
+	for line in output_lspci.splitlines():
+		if re.search("RAID bus controller", line) or re.search("Serial Attached SCSI controller", line):
+			SAS_Controller.append(line)
+
+	if not SAS_Controller:
+		SAS_Controller = [ "Unknown" ]
+
+	if len(SAS_Controller) == 1:
+		SAS_Controller = SAS_Controller[0]
+
+	Debug("Get_SASController()::  SAS Controller type = " + str(SAS_Controller))
+
+	if "Unknown" in SAS_Controller:
+		Debug("Get_SASController()::  There is an unknown controller type in this system.")
+
+	if re.search("Invader", SAS_Controller):
+		SAS_Controller = "LSI_Invader"
+
+	if re.search("Falcon", SAS_Controller):
+		SAS_Controller = "LSI_Falcon"
+
+	if re.search("Thunderbolt", SAS_Controller):
+		SAS_Controller = "LSI_Thunderbolt"
+
+	if re.search("Tri-Mode", SAS_Controller):
+		SAS_Controller = "LSI_Trimode"
+
+	Debug("Get_SASController():: function exit")
+
+	return(SAS_Controller)
+
+def get_errors_from_storcli():
+
+	"""
+	Return a reduced output of errors found for any virtual disks attached
+	to a LSI controller that uses storcli64
+	"""
+
+	output = SysExec("storcli64 /cALL/eALL/sALL show all")
+
+	for line in output.splitlines():
+
+		if not re.search("^Drive|Shield Counter|Error Count|Failure Count|S.M.A.R.T.|^SN|^Manufacturer|^Model", line):
+			continue
+
+		if re.search("Drive position|Policies/Settings|Device attributes|Detailed Information|State|Temperature", line):
+			continue
+
+		# If we have Drive (first line) and Model (last line), assume we've completed one pass through
+		if "Drive" in locals() and "Model" in locals():
+			if Drive is not None and Model is not None:
+
+				Debug(Drive + " " + Vendor + " " + Model + " " + Serial + " " + str(Shield_Counter) + " " + str(Media_Error_Count) + " " + str(Other_Error_Count) + " " + str(Predictive_Failure_Count) + " " + str(SMART_alert))
+
+				if Shield_Counter != 0:
+					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Shield Counter = " + str(Shield_Counter))
+				Shield_Counter = None
+
+				if Media_Error_Count != 0:
+					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Media Error Count = " + str(Media_Error_Count))
+				Media_Error_Count = None
+
+				if Other_Error_Count != 0:
+					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Other Error Count = " + str(Other_Error_Count))
+				Other_Error_Count = None
+
+				if Predictive_Failure_Count != 0:
+					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Predictive Failure Count = " + str(Predictive_Failure_Count))
+				Predictive_Failure_Count = None
+
+				if SMART_alert != "No":
+					printDevVirt_storcli(Drive, Vendor, Model, Serial, "SMART alert flagged by drive = " + str(SMART_alert))
+				SMART_alert = None
+
+				Drive = None
+				Serial = None
+				Vendor = None
+				Model = None
+
+		if re.search("Drive", line):
+			Drive = line.split()[1]
+
+		if re.search("Shield Counter", line):
+			Shield_Counter = int(line.split("=")[1].strip())
+
+		if re.search("Media Error Count", line):
+			Media_Error_Count = int(line.split("=")[1].strip())
+
+		if re.search("Other Error Count", line):
+			Other_Error_Count = int(line.split("=")[1].strip())
+
+		if re.search("Predictive Failure Count", line):
+			Predictive_Failure_Count = int(line.split("=")[1].strip())
+
+		if re.search("S.M.A.R.T alert flagged by drive", line):
+			SMART_alert = line.split("=")[1].strip()
+
+		if re.search("^SN", line):
+			Serial = line.split("=")[1].strip()
+
+		if re.search("^Manufacturer", line):
+			Vendor = line.split("=")[1].strip()
+
+		if re.search("^Model Number", line):
+			Model = line.split("=")[1].strip()
+
+
+
 ################################################################################
 # Main()::
 ################################################################################
@@ -210,7 +327,7 @@ Output = os.listdir("/sys/block")
 for line in Output:
 
 	# Skip various non-block devices
-	if re.search("^loop|^ram|^dm|^zram|^md|^sr|^drbd|^vd", line):
+	if re.search("^loop|^ram|^dm|^zram|^md|^sr", line):
 		continue
 
 	Devs.append("/dev/" + line)
@@ -221,7 +338,7 @@ Debug("Block devices found: " + str(Devs))
 # all drives in parallel then wait for them to complete to speed up access later
 jobs = []
 for Dev in Devs:
-	Debug("Spawning SysExec 'smartctl -x' process on Dev " + Dev)
+#	Debug("Spawning SysExec 'smartctl -x' process on Dev " + Dev)
 	p = threading.Thread(target = SysExec, args = ("smartctl -x " + Dev, ))
 	jobs.append(p)
 	p.start()
@@ -229,7 +346,6 @@ for Dev in Devs:
 Debug("Waiting for SysExec() jobs to complete...")
 for job in jobs:
 	job.join(30)
-
 
 # Determine the drive transport (SAS, SAS, NVME, Virtual) for each disk
 Drive_Transport = {}
@@ -258,18 +374,29 @@ for Dev in Devs:
 			Drive_Transport[Dev] = "Virtual"
 			break
 
-	Debug("Drive transport for " + Dev + " is " + Drive_Transport[Dev])
-
+#	Debug("Drive transport for " + Dev + " is " + Drive_Transport[Dev])
+# Debug("Drive_Transports = " + str(Drive_Transport))
 
 # Start iterating over Devs and searching for errors
 smart_attributes_headers = [ "id", "attribute_name", "flags", "value", "worst", "thresh", "fail", "raw_value" ]
 
-for Dev in Devs:
+# Report any virtual drives, then remove any drives whose Drive_Transport == "Virtual" from Devs:
+if "Virtual" in Drive_Transport.values():
 
-	# Reset Boolean tests each loop
-	dont_warn_smart_test = False
-	smart_segment = False
-	smart_log_errors_detected = False
+	Debug("Virtual disks detected")
+	SAS_Controller = Get_SASController()
+	Debug("SAS_Controller = " + str(SAS_Controller))
+
+	if SAS_Controller == "LSI_Invader":
+		get_errors_from_storcli()
+
+
+
+
+#	for key, val in Drive_Transport.items():
+
+
+for Dev in Devs:
 
 	if Drive_Transport[Dev] == "SATA":
 
@@ -289,24 +416,18 @@ for Dev in Devs:
 			if re.search("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]", line):
 				continue
 
-			if re.search("Not_testing|Read_scanning", line):
+			if re.search("Not_testing", line):
 				continue
 
-			if re.search("% of test|%", line):
+			if re.search("% of test", line):
 				continue
 
 			if re.search("[0-9a-f][0-9a-f] [0-9a-f][0-9a-f] [0-9a-f][0-9a-f]", line):
 				continue
 
-			Debug("line = " + line)
-
 			# At this point, the only thing left should be actual SMART attributes, so pluck them out
 			smart_attributes = dict(zip(smart_attributes_headers, line.split()))
-			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
-
-
-			if smart_attributes["thresh"] == "---":
-				smart_attributes["thresh"] = "000"
+#			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
 
 			# This is a corner case where value, worst and thresh are all 0.  Just ignore
 			if smart_attributes["value"] == "000" and smart_attributes["worst"] == "000" and smart_attributes["thresh"] == "000":
@@ -322,7 +443,7 @@ for Dev in Devs:
 			# This is a drive with a large number of failed sectors that isn't yet failing SMART
 			if smart_attributes["id"] == "197":
 				if int(smart_attributes["raw_value"]) > Thresh_197:
-					printDev(Dev, "197 Current_Pending_Sector value over " + str(Thresh_197) + " (" + smart_attributes["raw_value"] + " sectors)")
+					printDev(Dev, "197 Current_Pending_Sector value over " + str(Thresh_197))
 
 			# Don't report "9 Power_On_Hours" errors, we're gonna use them until they die...
 			if smart_attributes["id"] == "9":
@@ -331,11 +452,10 @@ for Dev in Devs:
 			Delta = int(smart_attributes["value"]) - int(smart_attributes["thresh"])
 
 			if Delta <= 0:
-				printDev(Dev, "Failing on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+				printDev(Dev, "failing on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
 
-			if Enable_Picky == True:
-				if Delta < Smart_Attribute_Thresh and Delta > 0 and int(smart_attributes["thresh"]) < 50:
-					printDev(Dev, "Marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
+			if Delta < Smart_Attribute_Thresh and Delta > 0 and int(smart_attributes["thresh"]) < 50:
+				printDev(Dev, "marginal on SMART attribute " + smart_attributes["id"] + " " + smart_attributes["attribute_name"])
 
 
 		# Pass 2:  Scan smartctl output for "Self-test execution status:"
@@ -355,65 +475,10 @@ for Dev in Devs:
 				Debug("Self-test execution status: " + msg)
 
 				if re.search("The previous self-test completed having the read element of the test failed", msg):
-					printDev(Dev, "Failing a read-element test.")
+					printDev(Dev, "failing a read-element test.")
 
 				if re.search("The previous self-test completed having a test element that failed", msg):
-					printDev(Dev, "Failing a test-element test.")
-
-		# Pass 3:  Scan smartctl output for other stuff
-		for line in SysExec("smartctl -x " + Dev).splitlines():
-
-			if Enable_Picky == True:
-
-				if re.search("^Error", line) and re.search("occurred at disk power-on lifetime", line) and not smart_log_errors_detected:
-					printDev(Dev, "SMART log errors detected, see smartctl -x output for more info")
-					smart_log_errors_detected = True
-
-			if re.search("Short offline|Extended offline", line) and \
-                           not re.search("Completed without error|Interrupted \(host reset\)|Self-test routine in progress|Aborted by host", line) and \
-                           not dont_warn_smart_test:
-				printDev(Dev, "SMART test errors detected, see smartctl -x output for more info")
-				dont_warn_smart_test = True
-
-			if Enable_Picky == True:
-
-				if re.search("Number of Reallocated Logical Sectors", line):
-					num_reallocated_logical_sectors = int(line.split()[3])
-					if num_reallocated_logical_sectors != 0:
-
-						# Skip a bad model
-						is_bad_model = (findModel(Dev) == "WDC WD4000F9YZ-0" and num_reallocated_logical_sectors == 200)
-
-						if not is_bad_model:
-							printDev(Dev, "Number of Reallocated Logical Sectors = " + str(num_reallocated_logical_sectors))
-
-			if re.search("Number of Mechanical Start Failures", line):
-				num_mechanical_start_failures = int(line.split()[3])
-				if num_mechanical_start_failures != 0:
-					printDev(Dev, "Number of Mechanical Start Failures = " + str(num_mechanical_start_failures))
-
-
-			if Enable_Picky == True:
-
-				if re.search("Number of Reported Uncorrectable Errors", line):
-					num_reported_uncorrectable_errors = int(line.split()[3])
-					if num_reported_uncorrectable_errors != 0:
-						printDev(Dev, "Number of Reported Uncorrectable Errors = " + str(num_reported_uncorrectable_errors))
-
-				if re.search("Number of Hardware Resets", line):
-					num_hardware_resets = int(line.split()[3])
-					if num_hardware_resets != 0:
-						printDev(Dev, "Number of Hardware Resets = " + str(num_hardware_resets))
-
-				if re.search("Number of ASR Events", line):
-					num_asr_events = int(line.split()[3])
-					if num_asr_events != 0:
-						printDev(Dev, "Number of ASR Events = " + str(num_asr_events))
-
-				if re.search("Number of Interface CRC Errors", line):
-					num_interface_crc_errors = int(line.split()[3])
-					if num_interface_crc_errors != 0:
-						printDev(Dev, "Number of Interface CRC Errors = " + str(num_interface_crc_errors))
+					printDev(Dev, "failing a test-element test.")
 
 
 	elif Drive_Transport[Dev] == "SAS":
@@ -425,18 +490,17 @@ for Dev in Devs:
 		for line in SysExec("smartctl -x " + Dev).splitlines():
 
 			if re.search("^SMART Health Status:", line):
-				smart_health_status = re.sub("^SMART Health Status:", "", line).strip()
+				smart_health_status = line.split(":")[1].strip()
 				if smart_health_status != "OK":
-					printDev(Dev, "SMART Health issues - " + smart_health_status)
+					printDev(Dev, "non-OK smart status " + smart_health_status)
 
 			if re.search("Elements in grown defect list", line):
 				Defects = int(line.split(":")[1].strip())
 
-				if Defects > SAS_Defect_Thresh:
-					printDev(Dev, "Critically-high number of defects (" + str(Defects) + " defects)")
-				elif Defects > Grown_Defect_Thresh and Defects <= SAS_Defect_Thresh:
-					if Enable_Picky == True:
-						printDev(Dev, "Non-zero number of defects (" + str(Defects) + " defects)")
+				if Defects > 50:
+					printDev(Dev, "critically-high number of defects (" + str(Defects) + " defects)")
+				elif Defects > Grown_Defect_Thresh and Defects <= 50:
+					printDev(Dev, "non-zero number of defects (" + str(Defects) + " defects)")
 
 			# This shows the error count due to non-medium problems like bad HBA, bad cable, etc.
 			# Disabled by default, but enable if you're trying to debug depots
@@ -447,50 +511,28 @@ for Dev in Devs:
 #					printDev(Dev, "non-zero number of Non-medium errors (" + str(Non_Medium_Errors) + " errors)")
 
 			if re.search("A mandatory SMART command failed", line):
-				printDev(Dev, "Failing mandatory SMART commands")
+				printDev(Dev, "failing mandatory SMART commands")
 
-			if Enable_Picky == True:
+			if re.search("^read:", line):
+				total_read_uncorrected_errors = int(line.split()[-1])
 
-				if re.search("^read:", line):
-					total_read_uncorrected_errors = int(line.split()[-1])
+				if total_read_uncorrected_errors > total_read_thresh:
+					printDev(Dev, "total read uncorrected errors > " + str(total_read_thresh) + " (" + str(total_read_uncorrected_errors) + " errors)")
 
-					if total_read_uncorrected_errors > total_read_thresh:
-						printDev(Dev, "Total read uncorrected errors > " + str(total_read_thresh) + " (" + str(total_read_uncorrected_errors) + " errors)")
+				read_correction_algorithm_invocations = int(line.split()[-3])
+				if read_correction_algorithm_invocations > read_correction_thresh:
+					printDev(Dev, "read correction algorithm invocations greater than > " + str(read_correction_thresh) + " (" + str(read_correction_algorithm_invocations) + " invocations)")
 
-					read_correction_algorithm_invocations = int(line.split()[-3])
-					if read_correction_algorithm_invocations > read_correction_thresh:
-						printDev(Dev, "Read correction algorithm invocations greater than > " + str(read_correction_thresh) + " (" + str(read_correction_algorithm_invocations) + " invocations)")
+			if re.search("^write:", line):
+				total_write_uncorrected_errors = int(line.split()[-1])
 
-				if re.search("^write:", line):
-					total_write_uncorrected_errors = int(line.split()[-1])
+				if total_write_uncorrected_errors > total_write_thresh:
+					printDev(Dev, "total write uncorrected errors > " + str(total_write_thresh) + " (" + str(total_write_uncorrected_errors) + " errors)")
 
-					if total_write_uncorrected_errors > total_write_thresh:
-						printDev(Dev, "Total write uncorrected errors > " + str(total_write_thresh) + " (" + str(total_write_uncorrected_errors) + " errors)")
+				write_correction_algorithm_invocations = int(line.split()[-3])
+				if write_correction_algorithm_invocations > write_correction_thresh:
+					printDev(Dev, "write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
 
-					write_correction_algorithm_invocations = int(line.split()[-3])
-					if write_correction_algorithm_invocations > write_correction_thresh:
-						printDev(Dev, "Write correction algorithm invocations greater than > " + str(write_correction_thresh) + " (" + str(write_correction_algorithm_invocations) + " invocations)")
-
-			if re.search("Failed in segment", line) and not smart_segment:
+			if re.search("Failed in segment", line) and not "smart_segment" in globals():
 				printDev(Dev, "SMART test failed in segment errors")
 				smart_segment = True
-
-			if re.search("Invalid DWORD count = ", line):
-				invalid_dword_count = int(line.split("=")[1].strip())
-				if invalid_dword_count > invalid_dword_count_thresh:
-					printDev(Dev, "Invalid DWORD count = " + str(invalid_dword_count))
-
-			if re.search("Running disparity error count = ", line):
-				running_disparity_error_count = int(line.split("=")[1].strip())
-				if running_disparity_error_count > running_disparity_error_count_thresh:
-					printDev(Dev, "Running disparity error count = " + str(running_disparity_error_count))
-
-			if re.search("Loss of DWORD synchronization = ", line):
-				loss_of_dword_synchronization = int(line.split("=")[1].strip())
-				if loss_of_dword_synchronization > loss_of_dword_synchronization_thresh:
-					printDev(Dev, "Loss of DWORD synchronization = " + str(loss_of_dword_synchronization))
-
-			if re.search("Phy reset problem = ", line):
-				phy_reset_problem = int(line.split("=")[1].strip())
-				if phy_reset_problem > phy_reset_problem_thresh:
-					printDev(Dev, "Phy reset problem = " + str(phy_reset_problem))
