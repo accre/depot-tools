@@ -22,6 +22,7 @@ Print_Debug = False
 # "Picky" sets reporting thresholds to 0, so a single error will report a message
 # "Practical" sets reporting thresholds to minimize minor messages
 Reports = "Practical"
+Reports = "Picky"
 
 if Reports == "Picky":
 	Thresh_197 = 0
@@ -398,6 +399,8 @@ if "Virtual" in Drive_Transport.values():
 
 for Dev in Devs:
 
+	Debug("Scanning drive " + str(Dev) + "...")
+
 	if Drive_Transport[Dev] == "SATA":
 
 		# Pass 1:  SMART attribute values
@@ -416,10 +419,7 @@ for Dev in Devs:
 			if re.search("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]", line):
 				continue
 
-			if re.search("Not_testing", line):
-				continue
-
-			if re.search("% of test", line):
+			if re.search("Not_testing|Read_scanning|% of test", line):
 				continue
 
 			if re.search("[0-9a-f][0-9a-f] [0-9a-f][0-9a-f] [0-9a-f][0-9a-f]", line):
