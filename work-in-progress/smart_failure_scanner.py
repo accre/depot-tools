@@ -42,7 +42,6 @@ elif Reports == "Practical":
 	read_correction_thresh = 10
 	write_correction_thresh = 10
 
-
 def Debug(text):
 
         """
@@ -152,6 +151,13 @@ def findVendor(SD_Device):
 
 	return(vendor.strip())
 
+def findMBVendor():
+	file = "/sys/devices/virtual/dmi/id/board_vendor"
+	f = open(file, "r")
+	vendor = f.read()
+	f.close()
+	return(vendor.strip())
+
 def findModel(SD_Device):
 
 	file = "/sys/block/" + SD_Device.split("/")[-1] + "/device/model"
@@ -241,6 +247,7 @@ def Get_SASController():
 
 	return(SAS_Controller)
 
+
 def get_errors_from_storcli():
 
 	"""
@@ -248,7 +255,12 @@ def get_errors_from_storcli():
 	to a LSI controller that uses storcli64
 	"""
 
-	output = SysExec("storcli64 /cALL/eALL/sALL show all")
+	if re.search("Dell", findMBVendor()):
+		STORCLI_Bin = "/opt/MegaRAID/perccli/perccli64"
+	else:
+		STORCLI_Bin = "storcli64"
+
+	output = SysExec(STORCLI_Bin + " /cALL/eALL/sALL show all")
 
 	for line in output.splitlines():
 
@@ -359,6 +371,10 @@ for Dev in Devs:
 	# Find out if the drive is SATA or SAS
 	Drive_Transport[Dev] = "SATA"   # By default
 	for line in SysExec("smartctl -x " + Dev).splitlines():
+
+		if re.search("DELL or MegaRaid controller, please try adding", line):
+			Drive_Transport[Dev] = "Virtual"
+			break
 
 		# This line appears to be standard on SAS drives
 		if re.search("Transport protocol", line) and re.search("SAS", line):
