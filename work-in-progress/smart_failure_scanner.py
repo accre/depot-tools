@@ -108,6 +108,9 @@ def HumanFriendlyBytes(bytes, scale, decimals):
 	if not scale in AcceptableScales:
 		return "ERROR"
 
+	if bytes == 0:
+		return "0B"
+
 	unit_i = int(math.floor(math.log(bytes, scale)))
 
 	if scale == 1000:
@@ -367,6 +370,11 @@ for Dev in Devs:
 	HD_Size  = findRawSize(Dev)
 	HD_Model = findModel(Dev)
 	HD_Capacity = HumanFriendlyBytes(HD_Size, 1000, 0)
+
+	# If the drive has a size of 0 bytes, it's fubar
+	if HD_Size == 0:
+		printDev(Dev, "Disk size = 0 bytes, apparent media failure")
+
 
 	# Find out if the drive is SATA or SAS
 	Drive_Transport[Dev] = "SATA"   # By default
