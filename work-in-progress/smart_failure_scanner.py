@@ -145,6 +145,27 @@ def findRawSize(SD_Device):
 	return int(numsec) * int(secsize)
 
 
+def map_dev_to_rid():
+
+	Dict_Dev_to_Rid = {}
+
+	if os.path.isdir("/dev/disk/by-label"):
+
+		for line in os.listdir("/dev/disk/by-label"):
+			if not re.search("rid-data", line):
+				continue
+
+			rid = line.split("-")[2]
+			dev = os.path.realpath("/dev/disk/by-label/" + line)
+			dev = re.sub("[0-9]*$", "", dev)
+
+			Dict_Dev_to_Rid[dev] = rid
+
+	Debug("map_dev_to_rid():: map = " + str(Dict_Dev_to_Rid))
+
+	return(Dict_Dev_to_Rid)
+
+
 def findVendor(SD_Device):
 
 	file = "/sys/block/" + SD_Device.split("/")[-1] + "/device/vendor"
@@ -188,14 +209,21 @@ def printDev(Dev, Str):
 	Model = findModel(Dev)
 	Serial = findSerial(Dev)
 
+	rid_dev_map = map_dev_to_rid()
+
 	if Vendor == "SEAGATE":
 		Serial = Serial[0:8]
+
+	Ridstr = ""
+	if Dev in rid_dev_map:
+		Rid = rid_dev_map[Dev]
+		Ridstr = ", Rid " + str(Rid)
 
 	Size = HumanFriendlyBytes(findRawSize(Dev), 1000, 0)
 	Size = re.sub("\.0", "", Size)
 	Size = re.sub(" ", "", Size)
 
-	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + " " + Size + ", serial " + Serial + "] - " + Str)
+	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + " " + Size + Ridstr + ", serial " + Serial + "] - " + Str)
 
 
 def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
