@@ -1,0 +1,15 @@
+### Log drive info once an hour
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# min  hr   dom month dow user  command
+0   *     *   *    *  root  /usr/local/bin/log_drive_info.sh > /var/log/drive_info.csv
+3   *     *   *    *  root cat /var/log/drive_info.csv >> /var/log/aggregate_drive_info.csv
+
+6   *     *   *    *  root /usr/local/bin/log_smart_attributes.sh > /var/log/smart_attributes.csv
+9   *     *   *    *  root cat /var/log/smart_attributes.csv >> /var/log/aggregate_smart_attributes.csv
+
+12   *     *   *    *  root /usr/local/bin/log_snmp_info.sh > /var/log/snmp_info.csv
+15   *     *   *    *  root cat /var/log/snmp_info.csv >> /var/log/aggregate_snmp_info.csv
+
+16   *     *   *    *  root /usr/local/bin/log_ipmi_sensors.sh > /var/log/ipmi_sensors.csv
+18   *     *   *    *  root cat /var/log/ipmi_sensors.csv >> /var/log/aggregate_ipmi_sensors.csv
