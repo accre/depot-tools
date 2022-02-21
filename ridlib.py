@@ -425,8 +425,6 @@ def Get_IBP_Server_Version():
                 build_date = re.sub("CMake Build Date: ", "", line).strip()
     else:
         string_file = "UNKNOWN"
-        if os.path.exists("/usr/bin/ibp_server"):
-            string_file = "/usr/bin/ibp_server"
         if os.path.exists("/usr/local/bin/ibp_server.exe"):
             string_file = "/usr/local/bin/ibp_server.exe"
         if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.0"):
@@ -976,30 +974,66 @@ def IBP_Server_Start():
 
 def IBP_Server_Stop():
 
-    name = ""
-    pid = 0
-    for proc in psutil.process_iter():
-        if re.search("ibp_server.", str(proc)):
-            name = proc.name()
-            pid = proc.pid
-            break
+    # I rewrote this to handle the case where there are multiple ibp_server processes
+    # running.   This often happens if a drive is yanked and leaves a defunct process behind
+    pid_arr = { p.pid: p.info for p in psutil.process_iter(['name', 'create_time']) }
+    new_pid_arr = {}
+    pid_order = {}
 
-    if not pid and not name:
+    for pid in pid_arr:
+        if re.search("ibp_server.", pid_arr[pid]["name"]):
+
+            if not pid in new_pid_arr:
+                new_pid_arr[pid] = {}
+                pid_order[pid] = {}
+
+            new_pid_arr[pid]["name"]        = pid_arr[pid]["name"]
+            new_pid_arr[pid]["create_time"] = pid_arr[pid]["create_time"]
+
+            pid_order[pid]                  = pid_arr[pid]["create_time"]
+
+    pid_arr = new_pid_arr
+    print("DEBUG:  pid_arr = " + str(pid_arr))
+
+    if not pid_arr:
         print("INFO:  ibp_server is not running")
         sys.exit()
 
-    print("INFO:  Sending SIGQUIT to name " + name + " and pid " + str(pid))
+    # We want to kill the processes oldest to newest
+    pid_order = dict(sorted(pid_order.items(), key=lambda item: item[1]))
+    print("DEBUG:  pid_order = " + str(pid_order))
 
-    os.kill(pid, signal.SIGQUIT)
+    for pid in pid_order:
 
-    while check_pid(pid):
-        time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-#		pid_status = SysExec("ps u -p"
-        pid_status = subprocess.Popen(
-            ['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
-        print("Waiting for ibp_server shutdown to complete...  " + time)
-        print(pid_status)
-        sleep(1)
+        # Try SIGQUIT for 120 seconds, then SIGKILL if it's still running
+        sig_try_time = 120
+
+        print("INFO:  Sending SIGQUIT to name " + pid_arr[pid]["name"] + " and pid " + str(pid))
+        if psutil.pid_exists(pid):
+                os.kill(pid, signal.SIGQUIT)
+
+        wait_timer = 0
+        while wait_timer <= sig_try_time:
+                if not check_pid(pid):
+                        break
+                time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+                pid_status = subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
+                print("Waiting for " + pid_arr[pid]["name"] + " SIGQUIT shutdown to complete...  " + time)
+                print(pid_status)
+                sleep(1)
+                wait_timer = wait_timer + 1
+
+        if psutil.pid_exists(pid):
+                print("INFO:  Sending SIGKILL to name " + pid_arr[pid]["name"] + " and pid " + str(pid))
+                os.kill(pid, signal.SIGKILL)
+
+        while check_pid(pid):
+                time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+                pid_status = subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
+                print("Waiting for " + pid_arr[pid]["name"] + " SIGKILL shutdown to complete...  " + time)
+                print(pid_status)
+                sleep(1)
+
 
     print("Completed shutdown.")
 
@@ -1882,10 +1916,9 @@ def RID_Import(Rid, MD_Dir, Snap=False):
         logging.debug("RID_Import:: Snapshot = " + str(Snap))
 
         if Snap == False:
-            SyncFiles = ["expire", "history", "id", "soft", "rid.settings"]
+            SyncFiles = ["expire", "history", "id", "soft", "rid.settings", "SEQUESTER_STATUS"]
         else:
-            SyncFiles = ["expire-snap", "history-snap",
-                         "id-snap", "soft-snap", "rid.settings"]
+            SyncFiles = ["snap/expire", "snap/history", "snap/id", "snap/soft"]
     else:
         SyncFiles = ["expire.db", "id.db", "manage.db",
                      "read.db", "soft.db", "write.db", "rid.settings"]
@@ -2000,11 +2033,12 @@ def RID_Export(Rid, MD_Dir="", Snap=False):
 
         logging.debug("RID_Export:: Snapshot = " + str(Snap))
 
+
         if Snap == False:
-            SyncFiles = ["expire", "history", "id", "soft", "rid.settings"]
+            SyncFiles = ["expire", "history", "id", "soft", "rid.settings", "SEQUESTER_STATUS"]
         else:
-            SyncFiles = ["expire-snap", "history-snap",
-                         "id-snap", "soft-snap", "rid.settings"]
+            SyncFiles = ["snap/expire", "snap/history", "snap/id", "snap/soft"]
+
     else:
         SyncFiles = ["expire.db", "id.db", "manage.db",
                      "read.db", "soft.db", "write.db", "rid.settings"]
