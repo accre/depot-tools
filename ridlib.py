@@ -974,14 +974,22 @@ def IBP_Server_Start():
 
 def IBP_Server_Stop():
 
-    # I rewrote this to handle the case where there are multiple ibp_server processes
-    # running.   This often happens if a drive is yanked and leaves a defunct process behind
+
+    # Rewritten to handle an edge case where there are defunct ibp_server processes.  Running
+    # SIGKILL on them will just cause an infinite loop.   Instead, only SIGKILL running
+    # processes.  This often happens when removing a drive.   This is a (hopefully) temporary
+    # method until Alan can implement a SIGCHLD handler in ibp_server
     pid_arr = { p.pid: p.info for p in psutil.process_iter(['name', 'create_time']) }
     new_pid_arr = {}
     pid_order = {}
 
     for pid in pid_arr:
+
         if re.search("ibp_server.", pid_arr[pid]["name"]):
+
+            proc = psutil.Process(pid)
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                continue
 
             if not pid in new_pid_arr:
                 new_pid_arr[pid] = {}
@@ -989,8 +997,6 @@ def IBP_Server_Stop():
 
             new_pid_arr[pid]["name"]        = pid_arr[pid]["name"]
             new_pid_arr[pid]["create_time"] = pid_arr[pid]["create_time"]
-
-            pid_order[pid]                  = pid_arr[pid]["create_time"]
 
     pid_arr = new_pid_arr
     print("DEBUG:  pid_arr = " + str(pid_arr))
@@ -1000,12 +1006,13 @@ def IBP_Server_Stop():
         sys.exit()
 
     # We want to kill the processes oldest to newest
-    pid_order = dict(sorted(pid_order.items(), key=lambda item: item[1]))
-    print("DEBUG:  pid_order = " + str(pid_order))
+#    pid_order = dict(sorted(pid_order.items(), key=lambda item: item[1]))
+#    print("DEBUG:  pid_order = " + str(pid_order))
 
-    for pid in pid_order:
+    for pid in pid_arr:
+#    for pid in pid_order:
 
-        # Try SIGQUIT for 120 seconds, then SIGKILL if it's still running
+        # Try SIGQUIT then quit after 120 seconds if it doesn't succeed.
         sig_try_time = 120
 
         print("INFO:  Sending SIGQUIT to name " + pid_arr[pid]["name"] + " and pid " + str(pid))
@@ -1024,15 +1031,16 @@ def IBP_Server_Stop():
                 wait_timer = wait_timer + 1
 
         if psutil.pid_exists(pid):
-                print("INFO:  Sending SIGKILL to name " + pid_arr[pid]["name"] + " and pid " + str(pid))
-                os.kill(pid, signal.SIGKILL)
+            print("ERROR:  SIGQUIT failed to stop " + pid_arr[pid]["name"] + "on pid " + str(pid))
+            sys.exit()
+#           os.kill(pid, signal.SIGKILL)
 
-        while check_pid(pid):
-                time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-                pid_status = subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
-                print("Waiting for " + pid_arr[pid]["name"] + " SIGKILL shutdown to complete...  " + time)
-                print(pid_status)
-                sleep(1)
+#        while check_pid(pid):
+#                time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+#                pid_status = subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
+#                print("Waiting for " + pid_arr[pid]["name"] + " SIGKILL shutdown to complete...  " + time)
+#                print(pid_status)
+#                sleep(1)
 
 
     print("Completed shutdown.")
