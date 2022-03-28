@@ -22,7 +22,7 @@ Print_Debug = False
 # "Picky" sets reporting thresholds to 0, so a single error will report a message
 # "Practical" sets reporting thresholds to minimize minor messages
 Reports = "Practical"
-Reports = "Picky"
+#Reports = "Picky"
 
 if Reports == "Picky":
 	Thresh_197 = 0
@@ -32,6 +32,7 @@ if Reports == "Picky":
 	total_write_thresh = 0
 	read_correction_thresh = 0
 	write_correction_thresh = 0
+	blocks_reassigned_thresh = 0
 
 elif Reports == "Practical":
 	Thresh_197 = 500
@@ -41,6 +42,7 @@ elif Reports == "Practical":
 	total_write_thresh = 10
 	read_correction_thresh = 10
 	write_correction_thresh = 10
+	blocks_reassigned_thresh = 2
 
 def Debug(text):
 
@@ -444,11 +446,6 @@ if "Virtual" in Drive_Transport.values():
 		get_errors_from_storcli()
 
 
-
-
-#	for key, val in Drive_Transport.items():
-
-
 for Dev in Devs:
 
 	Debug("Scanning drive " + str(Dev) + "...")
@@ -545,6 +542,14 @@ for Dev in Devs:
 				smart_health_status = line.split(":")[1].strip()
 				if smart_health_status != "OK":
 					printDev(Dev, "non-OK smart status " + smart_health_status)
+
+			if re.search("^Total new blocks reassigned", line):
+				blocks_reassigned = re.sub("Total new blocks reassigned", "", line)
+				blocks_reassigned = re.sub("<not available>", "0", blocks_reassigned)
+				blocks_reassigned = re.sub("=", "", blocks_reassigned)
+				blocks_reassigned = int(blocks_reassigned.strip())
+				if blocks_reassigned > blocks_reassigned_thresh:
+					printDev(Dev, "Total New blocks reassigned = " + str(blocks_reassigned))
 
 			if re.search("Elements in grown defect list", line):
 				Defects = int(line.split(":")[1].strip())
