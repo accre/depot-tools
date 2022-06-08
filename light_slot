@@ -14,7 +14,7 @@ CacheDataArray = {}
 CacheTimeArray = {}
 
 # Enable/disable debugging messages
-Print_Debug = False
+Print_Debug = True
 
 def Debug(text):
 
@@ -178,7 +178,9 @@ if not re.search(sys.argv[3], "on", re.IGNORECASE) and not re.search(sys.argv[3]
 	print("Error:  The location light can only be in state 'on' or 'off'.   You specified state '" + sys.argv[3] + "', which is invalid.")
 	sys.exit()
 
-if SAS_Controller == "LSI_Thunderbolt": # or SAS_Controller == "LSI_Invader":
+if SAS_Controller == "LSI_Thunderbolt":
+
+	Debug("LSI_Thunderbolt path")
 
 	Debug("Using MegaCli64 to switch locate LED...")
 
@@ -203,15 +205,19 @@ if SAS_Controller == "LSI_Thunderbolt": # or SAS_Controller == "LSI_Invader":
 
 elif SAS_Controller == "LSI_Invader":
 
+	Debug("LSI_Invader path")
+
 	Debug("Using storcli64 to switch locate LED...")
 
 	Debug("Backplanes_List = " + str(Backplanes_List))
 
-#DEBUG:  Backplanes_List = {'/dev/sg0': {'NumSlots': '24', 'Bus': '0:0:8:0', 'SASAddr': '50015b21405d353f', 'Alias': 'Front'}, '/dev/sg1': {'NumSlots': '12', 'Bus': '0:0:9:0', 'SASAddr': '50015b2140632dbf', 'Alias': 'Back'}}
-
-
 	for bp, keyvals in Backplanes_List.items():
+		Debug("Iterating bp = " + str(bp) + " keyvals = " + str(keyvals))
 		for key, val  in Backplanes_List[bp].items():
+			Debug("Iterating key = " + str(key) + " val " + str(val))
+
+			Debug("Searching for sys.argv[1] " + str(sys.argv[1]) + " in val " + val)
+
 			if re.search(sys.argv[1], val, re.IGNORECASE):
 				enclosure = Backplanes_List[bp]['Bus'].split(":")[2]
 				num_slots = int(Backplanes_List[bp]['NumSlots'])
@@ -236,22 +242,32 @@ elif SAS_Controller == "LSI_Invader":
 
 else:
 
+	Debug("Generic path")
+
 	Debug("Using sg_ses to switch locate LED...")
 
 	Debug("Testing for " + sys.argv[1] + " " + sys.argv[2])
 
 	for bp, keyvals in Backplanes_List.items():
+		Debug("Iterating bp = " + str(bp) + " keyvals = " + str(keyvals))
 		for key, val  in Backplanes_List[bp].items():
+			Debug("Iterating key = " + str(key) + " val " + str(val) + " across bp " + str(bp))
 			num_slots = int(Backplanes_List[bp]['NumSlots'])
-			Debug("bp " + str(bp) + " key " + key + " val " + val)
+			Debug("num_slots = " + str(num_slots))
 			if sys.argv[1] == val:
+				Debug("sys.argv[1] " + str(sys.argv[1]) + " = val " + str(val))
 				enclosure = bp
+				Debug("Enclosure = " + str(enclosure))
 				break
+
+		if "enclosure" in globals():
+			break
 
 	if not enclosure:
 		print("Error:  The backplane '" + sys.argv[1] + "' could not be found.")
 		sys.exit()
 
+	Debug("num_slots = " + str(num_slots))
 	if not int(sys.argv[2]) in range(0, num_slots):
 		print("ERROR:  Backplane only has " + str(num_slots) + " slots.")
 		sys.exit()
