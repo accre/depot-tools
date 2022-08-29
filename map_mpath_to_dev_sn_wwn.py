@@ -115,9 +115,13 @@ def is_multipath_enabled():
 	if not which("multipath"):
 		return(False)
 
+	multipath_ll = SysExec("multipath -ll")
+	if re.search("DM multipath kernel driver not loaded", multipath_ll):
+		return(False)
+
 	# Now query multipath and see if it's actually running in multipath
 	# mode or not
-	num_lines = sum(1 for line in SysExec("multipath -ll").splitlines())
+	num_lines = sum(1 for line in multipath_ll.splitlines())
 
 	if num_lines == 0:
 		return(False)
