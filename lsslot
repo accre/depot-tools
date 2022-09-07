@@ -15,6 +15,7 @@ import os
 
 from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
+from itertools import chain
 
 # Cache info
 CacheDataArray = {}
@@ -42,6 +43,8 @@ def SysExec(cmd):
         """
         Run the given command and return the output
         """
+
+        Debug("SysExec()::  Called with: " + str(cmd))
 
         # Cache the output of the command for 20 seconds
         Cache_Expires = 20
@@ -182,6 +185,12 @@ def Get_SASController():
 		if re.search(r"SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
 			SAS_Controller = "LSI_FusionMPT"
 			break
+
+		# New one
+		if re.search(r"Broadcom / LSI Fusion-MPT 12GSAS/PCIe Secure SAS38xx", line):
+			SAS_Controller = "LSI_Fusion_12Gbs"
+			break
+
 
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
 
@@ -482,7 +491,7 @@ def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
 			Remap_SAS_to_Dev[This_SAS] = This_Dev
 
 
-	if SAS_Controller == "LSI_Invader" or SAS_Controller == "LSI_FusionMPT":
+	if SAS_Controller == "LSI_Invader" or SAS_Controller == "LSI_FusionMPT" or SAS_Controller == "LSI_Fusion_12Gbs":
 
 		# On cms-depot18 it appears to need intermediate info too... :-|
 		if socket.gethostname() == "cms-depot18.vampire":
@@ -597,6 +606,10 @@ for Backplane in Backplane_List:
 		LedState = GetLocateLEDState(Backplane, i)
 
 		Output.append([Backplane_Alias, str(i), LedState, Dev, Rid])
+
+output_as_tuples = [ tuple(item) for item in Output ]
+Output = list(set(output_as_tuples))
+Output.sort()
 
 x = PrettyTable(["Backplane", "Slot", "Locate LED", "Dev", "RID"])
 x.padding_width = 1

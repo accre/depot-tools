@@ -102,9 +102,9 @@ def List_Enclosures():
 
 		SG_Dev = line.split()[-1]
 
-		SG_Bus = line.split()[0]
-		SG_Bus = re.sub("\[", "", SG_Bus)
-		SG_Bus = re.sub("\]", "", SG_Bus)
+		HCTL = line.split()[0]
+		HCTL = re.sub("\[", "", HCTL)
+		HCTL = re.sub("\]", "", HCTL)
 
 		SAS_Addr = "UNKNOWN_SAS"
 		SAS_Addr_Raw = SysExec("sg_ses --page=aes " + SG_Dev)
@@ -127,14 +127,27 @@ def List_Enclosures():
 		if Num_Slots in Alias_by_NumSlots:
 			Alias = Alias_by_NumSlots[Num_Slots]
 
-		Output.append([SG_Dev, Num_Slots, SG_Bus, SAS_Addr, Alias])
+		Output.append([SG_Dev, Num_Slots, HCTL, SAS_Addr, Alias])
 
 	return(Output)
 
+
 Enclosures = List_Enclosures()
 
-x = PrettyTable(["SG_Dev", "Num_Slots", "SG_Bus", "SAS_Addr", "Alias"])
+### At least until I change my mind, I only want to print each backplane
+### once.  So look at HCTL and only print info on the lowest SCSI host adapter
+min_host = 99999
+for row in Enclosures:
+	min_host = min(min_host, int(row[2].split(":")[0]))
+
+x = PrettyTable(["SG_Dev", "Num_Slots", "HCTL", "SAS_Addr", "Alias"])
 x.padding_width = 1
 for row in Enclosures:
+
+#	h = int(row[2].split(":")[0])
+
+#	if min_host == h:
+#		x.add_row(row)
+
 	x.add_row(row)
 print(x)
