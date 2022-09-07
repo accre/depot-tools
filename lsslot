@@ -280,7 +280,9 @@ def map_Dev_to_RID():
 
 		This_Dev = line.split(" ")[-1]
 		This_Dev = This_Dev.split("/")[2]
-		# This_Dev = re.sub("[0-9]*$", "", This_Dev)
+
+		if re.search("^sd", This_Dev):
+			This_Dev = re.sub("[0-9]*$", "", This_Dev)
 		This_Dev = "/dev/" + This_Dev
 
 		This_Rid = line.split(" ")[-3]
