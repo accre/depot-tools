@@ -83,6 +83,42 @@ def SysExec(cmd):
         return Return_Val
 
 
+def which(program):
+
+        """
+
+        Functions similar to the 'which' program in Unix.  Given
+        an executable filename, it will return the whole path to
+        that executable.
+
+        which("ls") should return "/bin/ls"
+
+        Will print an error message and terminate the program if
+        it can't locate the executable in the path.
+
+        """
+
+        def is_exe(fpath):
+                return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+
+        def ext_candidates(fpath):
+                yield fpath
+                for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
+                        yield fpath + ext
+
+        fpath, fname = os.path.split(program)
+
+        if fpath:
+                if is_exe(program):
+                        return program
+        else:
+                for path in os.environ["PATH"].split(os.pathsep):
+                        exe_file = os.path.join(path, program)
+                        for candidate in ext_candidates(exe_file):
+                                if is_exe(candidate):
+                                        return candidate
+
+
 def FindBackplanes():
 
 	"""
@@ -119,6 +155,7 @@ def FindBackplanes():
 def Get_ChassisBackplane():
 
 	"""
+	NOTE:  Currently unused
 	Try to guess the backplane model we are dealing with (Chenbro, AIC).  I'm not sure if there's
 	an official way of doing it, so this is just my hacky first stab at it.
 
@@ -243,7 +280,7 @@ def map_Dev_to_RID():
 
 		This_Dev = line.split(" ")[-1]
 		This_Dev = This_Dev.split("/")[2]
-		This_Dev = re.sub("[0-9]*$", "", This_Dev)
+		# This_Dev = re.sub("[0-9]*$", "", This_Dev)
 		This_Dev = "/dev/" + This_Dev
 
 		This_Rid = line.split(" ")[-3]
@@ -251,11 +288,18 @@ def map_Dev_to_RID():
 
 		Debug("map_Dev_to_Rid()::  Dev " + This_Dev + " = Rid " + This_Rid)
 
+		if multipath_active:
+			This_Dev = map_dm_to_mpath[This_Dev.split("/")[2]]
+			This_Dev = "/dev/mapper/" + This_Dev[0]
+
 		Map[This_Dev] = This_Rid
 
 	Debug("def map_Dev_to_RID() exit")
 
 	return Map
+
+#XYZZY DEBUG Dev_to_RID = {'/dev/dm-17': '5425', '/dev/dm-57': '5426',
+
 
 
 def map_SAS_to_Dev():
@@ -280,7 +324,7 @@ def map_SAS_to_Dev():
 
 		This_Dev = line.split(" ")[-1]
 		This_Dev = This_Dev.split("/")[2]
-		This_Dev = re.sub("[0-9]*$", "", This_Dev)
+		#This_Dev = re.sub("[0-9]*$", "", This_Dev)
 		This_Dev = "/dev/" + This_Dev
 
 		This_SAS = line.split(" ")[-3]
@@ -568,14 +612,75 @@ def map_Backplane_Slot_to_Dev(AllBackplanes):
 	return Map
 
 
+def is_multipath_enabled():
+
+        # Quick and dirty, but works for now.   Not a general-purpose boolean,
+        # but optimized for our current environment
+        #
+        # First, if SAS_Controller isn't "LSI_Fusion_12Gbs", then it won't be
+        #  running multipathing
+        if SAS_Controller != "LSI_Fusion_12Gbs":
+                return(False)
+
+        # Verify if the multipath binary exists in the PATH.  If not, then
+        # it's not running multipath
+        if not which("multipath"):
+                return(False)
+
+        multipath_ll = SysExec("multipath -ll")
+        if re.search("DM multipath kernel driver not loaded", multipath_ll):
+                return(False)
+
+        # Now query multipath and see if it's actually running in multipath
+        # mode or not
+        num_lines = sum(1 for line in multipath_ll.splitlines())
+
+        if num_lines == 0:
+                return(False)
+        else:
+                return(True)
+
+
+def map_dm_to_mpath():
+
+        # Build a dm_dev -> mpath_dev map so I can remap in lsslot on multipath devices
+
+        map = {}
+
+        for line in SysExec("ls -alh /dev/disk/by-id").splitlines():
+
+                if not re.search("mpath", line):
+                        continue
+
+                if re.search("uuid", line):
+                        continue
+
+                dm_dev = line.split()[-1].split("/")[2]
+                mpath_dev = line.split()[-3]
+                mpath_dev = re.sub("dm-name-", "", mpath_dev)
+                mpath_dev = re.sub("-part[12]", "", mpath_dev)
+
+                if not dm_dev in map:
+
+                        map[dm_dev] = []
+                        map[dm_dev].append(mpath_dev)
+
+        return(map)
+
+
 #############################################################################
 # Main Loop
 #############################################################################
 
-# Adjust this for any HBA-dependent stuff (shift-by-two, intermediate SAS->WWN)
+### Fetch the list of SAS Contollers
 SAS_Controller = Get_SASController()
 
-Foo = Get_ChassisBackplane()
+### See if multipathing is enable to determine which code path to take
+### Note that this test depends on the SAS_Controller variable above
+multipath_active = is_multipath_enabled()
+
+if multipath_active:
+	map_dm_to_mpath = map_dm_to_mpath()
 
 Backplane_List = FindBackplanes()
 
@@ -598,6 +703,10 @@ for Backplane in Backplane_List:
 			continue
 
 		Dev = Backplane_Slot_to_Dev[Backplane][i]
+
+		if multipath_active:
+			Dev = map_dm_to_mpath[Dev.split("/")[2]]
+			Dev = "/dev/mapper/" + Dev[0]
 
 		Rid = "Empty"
 		if Dev in Dev_to_RID:
