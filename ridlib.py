@@ -1981,7 +1981,8 @@ def RID_Import(Rid, MD_Dir, Snap=False):
 
         if not os.path.exists(Src + "/" + i):
             print("ERROR:  Cannot find source file/dir " + Src + "/" + i)
-            sys.exit(1)
+            continue
+ #           sys.exit(1)
 
         if os.path.isdir(Src + "/" + i):
             logging.debug("RID_Import:: Recursively copying folder " + Src + i + " to " + Dst + "/" + i)
