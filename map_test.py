@@ -222,6 +222,10 @@ def map_enclosures():
 		output = SysExec("sg_ses -p aes " + str(sg_dev)).splitlines()
 		num_slots = 0
 		for i in output:
+
+			if re.search("Element type: SAS expander", i):
+				break
+
 			if re.search("Element index:", i):
 				num_slots = num_slots + 1
 
@@ -325,18 +329,20 @@ def Return_SD_Dev(wwn_1, map):
 
 		wwn_2 = map[sd_dev]["sas_wwn"]
 
-		# Now, the actual Serial may be Serial, or Serial +/- 1 or 2.   I wish I understood the logic here better.
+		# Now, the actual Serial may be Serial, or Serial +/- 3.   I wish I understood the logic here better.
 		wwn_m1 = hex(int(wwn_2, 16) - 1)
 		wwn_p1 = hex(int(wwn_2, 16) + 1)
 		wwn_m2 = hex(int(wwn_2, 16) - 2)
 		wwn_p2 = hex(int(wwn_2, 16) + 2)
+		wwn_m3 = hex(int(wwn_2, 16) - 3)
+		wwn_p3 = hex(int(wwn_2, 16) + 3)
 
-		Serial_list = [ wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2 ]
+		Serial_list = [ wwn_m3, wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2, wwn_p3 ]
 
 		if wwn_1 in Serial_list:
 			return(sd_dev)
 
-	return("UNKNOWN")
+	return("EMPTY")
 
 
 ### Main()::
@@ -346,9 +352,9 @@ map1 = map_enclosures()
 map2 = map_sg_ses_enclosure_slot_to_sas_wwn()
 map3 = map_sd_dev_to_sas_wwn()
 
-#Debug("map1 = " + str(map1))
-#Debug("map2 = " + str(map2))
-#Debug("map3 = " + str(map3))
+Debug("map1 = " + str(map1))
+Debug("map2 = " + str(map2))
+Debug("map3 = " + str(map3))
 
 # We need to do additional maps if multipathing is enabled
 multipath_active = is_multipath_enabled()
@@ -356,7 +362,12 @@ Debug("Multipath_Active = " + str(multipath_active))
 
 # Iterate over the map and add the "Front"/"Back" alias to the map.
 for enclosure in map2:
-	alias = map1[enclosure]["alias"]
+
+	if map1[enclosure]:
+		if map1[enclosure]["alias"]:
+			alias = map1[enclosure]["alias"]
+	else:
+		alias = "unknown"
 	for slot in map2[enclosure]:
 		map2[enclosure][slot]["alias"] = alias + "_" + slot
 
