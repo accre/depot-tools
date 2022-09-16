@@ -129,6 +129,51 @@ def is_multipath_enabled():
 		return(True)
 
 
+def map_sata_wwn_to_hba_wwn():
+
+	# With SATA drives the HBA or backplane sometimes lies about the WWN of the actual drive.
+	# Get a list of all drives (so we can map sd_devices to their sg_devices), and then
+	# query sg_vpd --page=di <sg_dev> to find the mapping between fake WWN and real WWN.
+
+	map_sd_to_sg = {}
+
+	for line in SysExec("lsscsi -guN").splitlines():
+
+		line = ' '.join(line.split())
+
+		if not re.search(" disk ", line):
+			continue
+
+		sd_dev = line.split()[3]
+		sg_dev = line.split()[4]
+
+		map_sd_to_sg[sd_dev] = sg_dev
+
+
+	map_sata_wwn_to_hba_wwn = {}
+
+	for sd_dev in map_sd_to_sg:
+
+		sg_dev = map_sd_to_sg[sd_dev]
+
+		wwn_list = []
+
+		for line in SysExec("sg_vpd --page=di " + str(sg_dev)).splitlines():
+
+			if not re.search("0x5", line):
+				continue
+
+			wwn_list.append(line.strip())
+
+		if len(wwn_list) != 2:
+			continue
+
+		map_sata_wwn_to_hba_wwn[wwn_list[1]] = wwn_list[0]
+
+
+	return(map_sata_wwn_to_hba_wwn)
+
+
 def map_dm_to_mpath():
 
         map = {}
@@ -178,7 +223,6 @@ def map_mpath_to_sd_dev():
 
         map_1 = map_dm_to_sd_dev()
         map_2 = map_dm_to_mpath()
-
         dict_1 = dict(map_1)
         dict_2 = dict(map_2)
 
@@ -217,6 +261,8 @@ def map_enclosures():
 
 		map[sg_dev]["wwn"]  = wwn
 		map[sg_dev]["hctl"] = hctl
+
+# sg_ses -p aes /dev/sg9 | sed "/Element type: SAS expander/q" | egrep "(Element index|SAS address)" | uniq | grep -v "attached SAS"
 
 		# Figure out if it's the "front" or "back" backplane
 		output = SysExec("sg_ses -p aes " + str(sg_dev)).splitlines()
@@ -261,6 +307,8 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
 
 	map_enc = map_enclosures()
 
+	map_wwn = map_sata_wwn_to_hba_wwn()
+
 	for enc in map_enc.keys():
 
 		map[enc] = {}
@@ -270,11 +318,25 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
 
 		for line in SysExec("sg_ses -p aes " + str(enc)).splitlines():
 
-			if not re.search("(Element index:|SAS address)", line):
+			if re.search("Element type: SAS expander", line):
+				break
+
+			if not re.search("(Element index:|SAS address|target port for:)", line):
 				continue
 
 			if re.search("attached SAS address", line):
 				continue
+
+			if re.search("target port for:", line):
+
+				line = line.split(":")[1].strip()
+
+				if line == "SSP":
+					protocol = "SAS"
+				elif line == "SATA_device":
+					protocol = "SATA"
+				else:
+					protocol = "UNKNOWN_PROTO"
 
 			if re.search("Element index:", line):
 				slot = ' '.join(line.split())
@@ -283,7 +345,14 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
 				slot = slot.split()[0]
 
 			if re.search("SAS address", line):
+
 				sas_wwn = line.split(":")[1].strip()
+
+				if protocol == "SATA":
+					sas_wwn = map_wwn[sas_wwn]
+
+				if sas_wwn == "0x0":
+					sas_wwn = "EMPTY"
 
 			if slot and not slot in map[enc]:
 				map[enc][slot] = {}
@@ -325,6 +394,9 @@ def map_sd_dev_to_sas_wwn():
 
 def Return_SD_Dev(wwn_1, map):
 
+	if wwn_1 == "EMPTY":
+		return("EMPTY")
+
 	for sd_dev in map.keys():
 
 		wwn_2 = map[sd_dev]["sas_wwn"]
@@ -334,15 +406,16 @@ def Return_SD_Dev(wwn_1, map):
 		wwn_p1 = hex(int(wwn_2, 16) + 1)
 		wwn_m2 = hex(int(wwn_2, 16) - 2)
 		wwn_p2 = hex(int(wwn_2, 16) + 2)
-		wwn_m3 = hex(int(wwn_2, 16) - 3)
-		wwn_p3 = hex(int(wwn_2, 16) + 3)
+#		wwn_m3 = hex(int(wwn_2, 16) - 3)
+#		wwn_p3 = hex(int(wwn_2, 16) + 3)
 
-		Serial_list = [ wwn_m3, wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2, wwn_p3 ]
+#		Serial_list = [ wwn_m3, wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2, wwn_p3 ]
+		Serial_list = [ wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2 ]
 
 		if wwn_1 in Serial_list:
 			return(sd_dev)
 
-	return("EMPTY")
+	return("UNKNOWN")
 
 
 ### Main()::
