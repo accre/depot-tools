@@ -106,6 +106,24 @@ def which(program):
                                 if is_exe(candidate):
                                         return candidate
 
+
+def GetLocateLEDState(This_Backplane, This_Slot):
+
+        """
+        This function returns the state of the Locate LED on the given backplane/slot
+        """
+
+        This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
+
+        LedState_Descr = "Unknown"
+        if This_LedState == "1":
+                LedState_Descr = "On"
+        if This_LedState == "0":
+                LedState_Descr = "Off"
+
+        return LedState_Descr
+
+
 def is_multipath_enabled():
 
 	# Quick and dirty, but works for now.
@@ -176,25 +194,35 @@ def map_sata_wwn_to_hba_wwn():
 
 def map_dm_to_mpath():
 
-        map = {}
+	map = {}
 
-        for line in SysExec("ls -alh /dev/mapper").splitlines():
+	for line in SysExec("ls -alh /dev/mapper").splitlines():
 
-                if re.search("part", line):
-                        continue
+		if not re.search("mpath", line):
+			continue
 
-                if not re.search("mpath", line):
-                        continue
+		line = " ".join(line.split())
 
-                line = " ".join(line.split())
+		dm_dev = line.split()[-1].split("/")[1]
 
-                dm_dev = line.split()[-1].split("/")[1]
-                mpath_dev = line.split()[-3]
+		mpath_dev = line.split()[-3]
+		mpath_dev = re.sub("-part1", "", mpath_dev)
+		mpath_dev = re.sub("-part2", "", mpath_dev)
 
-                map[dm_dev] = mpath_dev
+		map[dm_dev] = mpath_dev
 #                Debug("map_dm_to_mpath()::  dm_dev = " + str(dm_dev) + " and mpath_dev = " + str(mpath_dev))
 
-        return(map)
+	return(map)
+
+
+
+#lrwxrwxrwx  1 root root       8 Sep 12 10:12 mpathz -> ../dm-20
+#lrwxrwxrwx  1 root root       8 Sep 12 10:12 mpathz-part1 -> ../dm-27
+#lrwxrwxrwx  1 root root       8 Sep 12 10:12 mpathz-part2 -> ../dm-28
+
+#
+#ls -alh /dev/mapper | sed "s/\-part[12]//"
+
 
 
 def map_dm_to_sd_dev():
@@ -219,23 +247,67 @@ def map_dm_to_sd_dev():
 
 def map_mpath_to_sd_dev():
 
-        map = {}
+	map = {}
 
-        map_1 = map_dm_to_sd_dev()
-        map_2 = map_dm_to_mpath()
-        dict_1 = dict(map_1)
-        dict_2 = dict(map_2)
+	map_1 = map_dm_to_sd_dev()
+	map_2 = map_dm_to_mpath()
 
-        for dm in sorted(dict_1):
+	dict_1 = dict(map_1)
+	dict_2 = dict(map_2)
 
-                sd_dev = map_1[dm]
-                mpath  = map_2[dm]
+	for dm in sorted(dict_1):
 
-                map[mpath] = sd_dev
+		sd_dev = map_1[dm]
+		mpath  = map_2[dm]
 
-#                Debug("map_mpath_to_sd_dev()::  dm = " + str(dm) + " and mpath = " + str(mpath) + " and sd_dev = " + str(sd_dev))
+		map[mpath] = sd_dev
 
-        return(map)
+#		Debug("map_mpath_to_sd_dev()::  dm = " + str(dm) + " and mpath = " + str(mpath) + " and sd_dev = " + str(sd_dev))
+
+	return(map)
+
+
+def map_Dev_to_RID():
+
+	"""
+	Return a map of /dev/ entry -> RID
+	"""
+
+	Debug("def map_Dev_to_RID() entry")
+
+	Map = {}
+
+	output_ridlist = SysExec("ls -alh /dev/disk/by-label")
+
+	map_dm_mpath = map_dm_to_mpath()
+
+	for line in output_ridlist.splitlines():
+
+		if not re.search("rid-data-", line):
+			continue
+
+		This_Dev = line.split(" ")[-1]
+		This_Dev = This_Dev.split("/")[2]
+
+		if re.search("^sd", This_Dev):
+			This_Dev = re.sub("[0-9]*$", "", This_Dev)
+		This_Dev = "/dev/" + This_Dev
+
+		This_Rid = line.split(" ")[-3]
+		This_Rid = This_Rid.split("-")[2]
+
+		Debug("map_Dev_to_Rid()::  Dev " + This_Dev + " = Rid " + This_Rid)
+
+		if multipath_active:
+			This_Dev = This_Dev.split("/")[2]
+			This_Dev = map_dm_mpath[This_Dev]
+			This_Dev = "/dev/mapper/" + This_Dev
+
+		Map[This_Dev] = This_Rid
+
+	Debug("def map_Dev_to_RID() exit")
+
+	return(Map)
 
 
 def map_enclosures():
@@ -425,15 +497,18 @@ map1 = map_enclosures()
 map2 = map_sg_ses_enclosure_slot_to_sas_wwn()
 map3 = map_sd_dev_to_sas_wwn()
 
-Debug("map1 = " + str(map1))
-Debug("map2 = " + str(map2))
-Debug("map3 = " + str(map3))
+# Debug("map1 = " + str(map1))
+# Debug("map2 = " + str(map2))
+# Debug("map3 = " + str(map3))
 
 # We need to do additional maps if multipathing is enabled
 multipath_active = is_multipath_enabled()
 Debug("Multipath_Active = " + str(multipath_active))
 
-# Iterate over the map and add the "Front"/"Back" alias to the map.
+Dev_to_RID = map_Dev_to_RID()
+Debug("Dev_to_RID = " + str(Dev_to_RID))
+
+# Iterate over the map and add the "Front"/"Back" alias to the map as well as LED locate status
 for enclosure in map2:
 
 	if map1[enclosure]:
@@ -441,8 +516,14 @@ for enclosure in map2:
 			alias = map1[enclosure]["alias"]
 	else:
 		alias = "unknown"
+
 	for slot in map2[enclosure]:
+
+		led_status = GetLocateLEDState(enclosure, slot)
+
 		map2[enclosure][slot]["alias"] = alias + "_" + slot
+		map2[enclosure][slot]["locate_led"] = led_status
+
 
 # Iterate over the map and only leave backplanes from the lowest (h)ctl
 min_h = 9999
@@ -463,20 +544,42 @@ for enclosure in map2:
 		Debug("Enclosure " + str(enclosure) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
 		map2[enclosure][slot]["sd_dev"] = sd_dev
 
+		map2[enclosure][slot]["rid"] = "Empty"
+
+		if sd_dev in Dev_to_RID.keys():
+			map2[enclosure][slot]["rid"] = Dev_to_RID[map2[enclosure][slot]["sd_dev"]]
+
 		if multipath_active:
+
 			map4 = map_mpath_to_sd_dev()
+
 			for key, val in map4.items():
 
 				val_list = val.split(",")
 
 				if sd_dev.split("/")[2] in val_list:
 					map2[enclosure][slot]["mpath_dev"] = "/dev/mapper/" + str(key)
+					map2[enclosure][slot]["rid"] = Dev_to_RID[map2[enclosure][slot]["mpath_dev"]]
 					map2[enclosure][slot]["sd_dev"] = [ "/dev/" + x for x in val_list]
 					continue
-		continue
+
+
 
 # Iterate over map2 and print
-print("Enclosure\tSlot\tDrive")
+print("Enclosure\tSlot\tLocate_LED\tDev\tRID")
+print("=====================================================")
 for enclosure in map2:
 	for slot in map2[enclosure]:
-		print(enclosure +  "\t" + slot + "\t" + str(map2[enclosure][slot]))
+
+		locate = map2[enclosure][slot]["locate_led"]
+		rid    = map2[enclosure][slot]["rid"]
+
+		alias  = map2[enclosure][slot]["alias"]
+		alias_bp = alias.split("_")[0]
+		alias_sl = alias.split("_")[1]
+
+		bd     = map2[enclosure][slot]["sd_dev"]
+		if map2[enclosure][slot]["mpath_dev"]:
+			bd     = map2[enclosure][slot]["mpath_dev"]
+
+		print(alias_bp +  "\t" + alias_sl + "\t" + locate + "\t" + bd + "\t" + rid)
