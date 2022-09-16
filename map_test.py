@@ -8,6 +8,8 @@ import sys
 import math
 import time
 
+from prettytable import PrettyTable
+
 # Note:  Any time you can avoid using Popen is a huge win time-wise
 from subprocess import Popen, PIPE, STDOUT
 
@@ -215,16 +217,6 @@ def map_dm_to_mpath():
 	return(map)
 
 
-
-#lrwxrwxrwx  1 root root       8 Sep 12 10:12 mpathz -> ../dm-20
-#lrwxrwxrwx  1 root root       8 Sep 12 10:12 mpathz-part1 -> ../dm-27
-#lrwxrwxrwx  1 root root       8 Sep 12 10:12 mpathz-part2 -> ../dm-28
-
-#
-#ls -alh /dev/mapper | sed "s/\-part[12]//"
-
-
-
 def map_dm_to_sd_dev():
 
         map = {}
@@ -358,8 +350,6 @@ def map_enclosures():
 
 		for line in SysExec("sg_ses -p cf " + sg_dev).splitlines():
 
-			# There are other things that could be parsed out, but for now focus on these two
-
 			if re.search("enclosure vendor:", line):
 				enc_vendor = re.sub("vendor:", ":", line)
 				enc_vendor = enc_vendor.split(":")[1].strip()
@@ -478,10 +468,7 @@ def Return_SD_Dev(wwn_1, map):
 		wwn_p1 = hex(int(wwn_2, 16) + 1)
 		wwn_m2 = hex(int(wwn_2, 16) - 2)
 		wwn_p2 = hex(int(wwn_2, 16) + 2)
-#		wwn_m3 = hex(int(wwn_2, 16) - 3)
-#		wwn_p3 = hex(int(wwn_2, 16) + 3)
 
-#		Serial_list = [ wwn_m3, wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2, wwn_p3 ]
 		Serial_list = [ wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2 ]
 
 		if wwn_1 in Serial_list:
@@ -496,10 +483,6 @@ def Return_SD_Dev(wwn_1, map):
 map1 = map_enclosures()
 map2 = map_sg_ses_enclosure_slot_to_sas_wwn()
 map3 = map_sd_dev_to_sas_wwn()
-
-# Debug("map1 = " + str(map1))
-# Debug("map2 = " + str(map2))
-# Debug("map3 = " + str(map3))
 
 # We need to do additional maps if multipathing is enabled
 multipath_active = is_multipath_enabled()
@@ -564,10 +547,8 @@ for enclosure in map2:
 					continue
 
 
-
-# Iterate over map2 and print
-print("Enclosure\tSlot\tLocate_LED\tDev\t\tRID")
-print("=============================================================")
+output = []
+# Iterate over map2 and build output list
 for enclosure in map2:
 	for slot in map2[enclosure]:
 
@@ -581,5 +562,11 @@ for enclosure in map2:
 		bd     = map2[enclosure][slot]["sd_dev"]
 		if multipath_active:
 			bd     = map2[enclosure][slot]["mpath_dev"]
+		output.append([alias_bp, alias_sl, locate, bd, rid])
 
-		print(alias_bp +  "\t\t" + alias_sl + "\t" + locate + "\t\t" + bd + "\t" + rid)
+x = PrettyTable(["Backplane", "Slot", "Locate LED", "Dev", "RID"])
+x.padding_width = 1
+x.align = "l"
+for row in output:
+        x.add_row(row)
+print(x)
