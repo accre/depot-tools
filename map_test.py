@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-### Map drive -> enclosure/slot using sg_ses (hopefully a generic method that works on most/all depots)
+### Map drive -> enclosure/slot using sg_ses (hopefully a generic method that works on most/all depots without modification)
 
 import re
 import os
@@ -16,7 +16,7 @@ CacheDataArray = {}
 CacheTimeArray = {}
 
 # Enable/disable debugging messages
-Print_Debug = True
+Print_Debug = False
 
 def Debug(text):
 
@@ -206,6 +206,8 @@ def map_enclosures():
 		line = " ".join(line.split())
 
 		hctl = line.split()[0]
+		hctl = re.sub("(\[|\])", "", hctl)
+
 		wwn  = line.split()[2]
 		sg_dev = line.split()[4]
 
@@ -337,22 +339,44 @@ def Return_SD_Dev(wwn_1, map):
 	return("UNKNOWN")
 
 
-
-## Main()
+### Main()::
 
 # We need to get these mappings on all machines
 map1 = map_enclosures()
 map2 = map_sg_ses_enclosure_slot_to_sas_wwn()
 map3 = map_sd_dev_to_sas_wwn()
 
+#Debug("map1 = " + str(map1))
+#Debug("map2 = " + str(map2))
+#Debug("map3 = " + str(map3))
+
 # We need to do additional maps if multipathing is enabled
 multipath_active = is_multipath_enabled()
+Debug("Multipath_Active = " + str(multipath_active))
 
+# Iterate over the map and add the "Front"/"Back" alias to the map.
+for enclosure in map2:
+	alias = map1[enclosure]["alias"]
+	for slot in map2[enclosure]:
+		map2[enclosure][slot]["alias"] = alias + "_" + slot
+
+# Iterate over the map and only leave backplanes from the lowest (h)ctl
+min_h = 9999
+for enclosure in map1:
+	h     = int(map1[enclosure]["hctl"].split(":")[0])
+	min_h = min(min_h, h)
+
+for enclosure in map1:
+	h     = int(map1[enclosure]["hctl"].split(":")[0])
+	if h > min_h:
+		del map2[enclosure]
+
+# Add sd_dev (and mpath_dev for multipath devices) to the map
 for enclosure in map2:
 	for slot in map2[enclosure]:
 		wwn = map2[enclosure][slot]["wwn"]
 		sd_dev = Return_SD_Dev(wwn, map3)
-#		Debug("Enclosure " + str(enclosure) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
+		Debug("Enclosure " + str(enclosure) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
 		map2[enclosure][slot]["sd_dev"] = sd_dev
 
 		if multipath_active:
@@ -364,5 +388,11 @@ for enclosure in map2:
 				if sd_dev.split("/")[2] in val_list:
 					map2[enclosure][slot]["mpath_dev"] = "/dev/mapper/" + str(key)
 					map2[enclosure][slot]["sd_dev"] = [ "/dev/" + x for x in val_list]
+					continue
+		continue
 
-Debug("map2 = " + str(map2))
+# Iterate over map2 and print
+print("Enclosure\tSlot\tDrive")
+for enclosure in map2:
+	for slot in map2[enclosure]:
+		print(enclosure +  "\t" + slot + "\t" + str(map2[enclosure][slot]))
