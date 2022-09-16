@@ -566,8 +566,8 @@ for enclosure in map2:
 
 
 # Iterate over map2 and print
-print("Enclosure\tSlot\tLocate_LED\tDev\tRID")
-print("=====================================================")
+print("Enclosure\tSlot\tLocate_LED\tDev\t\tRID")
+print("=============================================================")
 for enclosure in map2:
 	for slot in map2[enclosure]:
 
@@ -579,7 +579,7 @@ for enclosure in map2:
 		alias_sl = alias.split("_")[1]
 
 		bd     = map2[enclosure][slot]["sd_dev"]
-		if map2[enclosure][slot]["mpath_dev"]:
+		if multipath_active:
 			bd     = map2[enclosure][slot]["mpath_dev"]
 
-		print(alias_bp +  "\t" + alias_sl + "\t" + locate + "\t" + bd + "\t" + rid)
+		print(alias_bp +  "\t\t" + alias_sl + "\t" + locate + "\t\t" + bd + "\t" + rid)
