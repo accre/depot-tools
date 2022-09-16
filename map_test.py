@@ -28,6 +28,7 @@ def Debug(text):
                 print("DEBUG: " + text)
         return
 
+
 def SysExec(cmd):
 
         """
@@ -74,7 +75,6 @@ def SysExec(cmd):
 def which(program):
 
         """
-
         Functions similar to the 'which' program in Unix.  Given
         an executable filename, it will return the whole path to
         that executable.
@@ -106,9 +106,12 @@ def which(program):
                                 if is_exe(candidate):
                                         return candidate
 
+
 def is_multipath_enabled():
 
-	# Quick and dirty, but works for now.
+	"""
+	Return True if multipath is enabled, False if disabled
+	"""
 
 	# Verify if the multipath binary exists in the PATH.  If not, then
 	# it's not running multipath
@@ -129,11 +132,30 @@ def is_multipath_enabled():
 		return(True)
 
 
+def GetLocateLEDState(This_Backplane, This_Slot):
+
+        """
+        This function returns the state of the Locate LED on the given backplane/slot
+        """
+
+        This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
+
+        LedState_Descr = "Unknown"
+        if This_LedState == "1":
+                LedState_Descr = "On"
+        if This_LedState == "0":
+                LedState_Descr = "Off"
+
+        return LedState_Descr
+
+
 def map_sata_wwn_to_hba_wwn():
 
-	# With SATA drives the HBA or backplane sometimes lies about the WWN of the actual drive.
-	# Get a list of all drives (so we can map sd_devices to their sg_devices), and then
-	# query sg_vpd --page=di <sg_dev> to find the mapping between fake WWN and real WWN.
+	"""
+	With SATA drives the HBA or backplane sometimes lies about the WWN of the actual drive.
+	Get a list of all drives (so we can map sd_devices to their sg_devices), and then
+	query sg_vpd --page=di <sg_dev> to find the mapping between fake WWN and real WWN and correct.
+	"""
 
 	map_sd_to_sg = {}
 
@@ -148,7 +170,6 @@ def map_sata_wwn_to_hba_wwn():
 		sg_dev = line.split()[4]
 
 		map_sd_to_sg[sd_dev] = sg_dev
-
 
 	map_sata_wwn_to_hba_wwn = {}
 
@@ -170,34 +191,40 @@ def map_sata_wwn_to_hba_wwn():
 
 		map_sata_wwn_to_hba_wwn[wwn_list[1]] = wwn_list[0]
 
-
 	return(map_sata_wwn_to_hba_wwn)
 
 
 def map_dm_to_mpath():
 
-        map = {}
+	"""
+	On multipath servers, get the mapping of dm block device -> mpath device
+	"""
 
-        for line in SysExec("ls -alh /dev/mapper").splitlines():
+	map = {}
 
-                if re.search("part", line):
-                        continue
+	for line in SysExec("ls -alh /dev/mapper").splitlines():
 
-                if not re.search("mpath", line):
-                        continue
+		if re.search("part", line):
+			continue
 
-                line = " ".join(line.split())
+		if not re.search("mpath", line):
+			continue
 
-                dm_dev = line.split()[-1].split("/")[1]
-                mpath_dev = line.split()[-3]
+		line = " ".join(line.split())
 
-                map[dm_dev] = mpath_dev
-#                Debug("map_dm_to_mpath()::  dm_dev = " + str(dm_dev) + " and mpath_dev = " + str(mpath_dev))
+		dm_dev = line.split()[-1].split("/")[1]
+		mpath_dev = line.split()[-3]
 
-        return(map)
+		map[dm_dev] = mpath_dev
+
+	return(map)
 
 
 def map_dm_to_sd_dev():
+
+        """
+        On multipath servers, get the mapping of dm block device -> sd block device
+        """
 
         map = {}
 
@@ -213,11 +240,15 @@ def map_dm_to_sd_dev():
                         continue
 
                 map[dm_dev] = sd_dev
- #               Debug("map_dm_to_sd_dev():: dm_dev = " + str(dm_dev) + " and sd_dev = " + str(sd_dev))
 
         return(map)
 
+
 def map_mpath_to_sd_dev():
+
+        """
+        On multipath servers, get the mapping of mpath device -> sd device
+        """
 
         map = {}
 
@@ -233,12 +264,14 @@ def map_mpath_to_sd_dev():
 
                 map[mpath] = sd_dev
 
-#                Debug("map_mpath_to_sd_dev()::  dm = " + str(dm) + " and mpath = " + str(mpath) + " and sd_dev = " + str(sd_dev))
-
         return(map)
 
 
 def map_enclosures():
+
+	"""
+	Get a list of useful info on storage backplanes in this server
+	"""
 
 	map = {}
 
@@ -255,14 +288,13 @@ def map_enclosures():
 		wwn  = line.split()[2]
 		sg_dev = line.split()[4]
 
-		# WWN maps to the backplane, while HCTL and SG_Dev map depend on number of HBA's.  For a depot with N hba's, they will have N unique values.
+		# WWN maps to the backplane, while HCTL and SG_Dev map depend on
+		# number of HBA's.  For a depot with N hba's, they will have N unique values.
 		if not sg_dev in map:
 			map[sg_dev] = {}
 
 		map[sg_dev]["wwn"]  = wwn
 		map[sg_dev]["hctl"] = hctl
-
-# sg_ses -p aes /dev/sg9 | sed "/Element type: SAS expander/q" | egrep "(Element index|SAS address)" | uniq | grep -v "attached SAS"
 
 		# Figure out if it's the "front" or "back" backplane
 		output = SysExec("sg_ses -p aes " + str(sg_dev)).splitlines()
@@ -286,8 +318,6 @@ def map_enclosures():
 
 		for line in SysExec("sg_ses -p cf " + sg_dev).splitlines():
 
-			# There are other things that could be parsed out, but for now focus on these two
-
 			if re.search("enclosure vendor:", line):
 				enc_vendor = re.sub("vendor:", ":", line)
 				enc_vendor = enc_vendor.split(":")[1].strip()
@@ -302,6 +332,10 @@ def map_enclosures():
 
 
 def map_sg_ses_enclosure_slot_to_sas_wwn():
+
+	"""
+	Use the "sg_ses" utility to build a map of enclosure/slot to SAS WWN for the drive
+	"""
 
 	map = {}
 
@@ -370,6 +404,10 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
 
 def map_sd_dev_to_sas_wwn():
 
+	"""
+	Use lsblk to build a map from sd_device to sas wwn's.
+	"""
+
 	map = {}
 
 	for line in SysExec("lsblk -S -o PATH,HCTL,WWN,SERIAL").splitlines():
@@ -401,15 +439,12 @@ def Return_SD_Dev(wwn_1, map):
 
 		wwn_2 = map[sd_dev]["sas_wwn"]
 
-		# Now, the actual Serial may be Serial, or Serial +/- 3.   I wish I understood the logic here better.
+		# Now, the actual Serial may be Serial, or Serial +/- 2.   I wish I understood the logic here better.
 		wwn_m1 = hex(int(wwn_2, 16) - 1)
 		wwn_p1 = hex(int(wwn_2, 16) + 1)
 		wwn_m2 = hex(int(wwn_2, 16) - 2)
 		wwn_p2 = hex(int(wwn_2, 16) + 2)
-#		wwn_m3 = hex(int(wwn_2, 16) - 3)
-#		wwn_p3 = hex(int(wwn_2, 16) + 3)
 
-#		Serial_list = [ wwn_m3, wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2, wwn_p3 ]
 		Serial_list = [ wwn_m2, wwn_m1, wwn_2, wwn_p1, wwn_p2 ]
 
 		if wwn_1 in Serial_list:
@@ -425,15 +460,15 @@ map1 = map_enclosures()
 map2 = map_sg_ses_enclosure_slot_to_sas_wwn()
 map3 = map_sd_dev_to_sas_wwn()
 
-Debug("map1 = " + str(map1))
-Debug("map2 = " + str(map2))
-Debug("map3 = " + str(map3))
+#Debug("map1 = " + str(map1))
+#Debug("map2 = " + str(map2))
+#Debug("map3 = " + str(map3))
 
 # We need to do additional maps if multipathing is enabled
 multipath_active = is_multipath_enabled()
-Debug("Multipath_Active = " + str(multipath_active))
+#Debug("Multipath_Active = " + str(multipath_active))
 
-# Iterate over the map and add the "Front"/"Back" alias to the map.
+# Iterate over the map and add the "Front"/"Back" alias to the map as well as LED locate status
 for enclosure in map2:
 
 	if map1[enclosure]:
@@ -441,8 +476,13 @@ for enclosure in map2:
 			alias = map1[enclosure]["alias"]
 	else:
 		alias = "unknown"
+
 	for slot in map2[enclosure]:
+
+		led_status = GetLocateLEDState(enclosure, slot)
+
 		map2[enclosure][slot]["alias"] = alias + "_" + slot
+		map2[enclosure][slot]["locate_led"] = led_status
 
 # Iterate over the map and only leave backplanes from the lowest (h)ctl
 min_h = 9999
