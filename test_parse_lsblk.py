@@ -389,6 +389,7 @@ def map_dm_to_mpath():
 
 		map[dm_dev] = mpath_dev
 
+	Debug("map_dm_to_mpath():: final_map = " + str(map))
 	Debug("def map_dm_to_mpath() exit")
 
 	return(map)
@@ -417,6 +418,7 @@ def map_dm_to_sd_dev():
 
 		map[dm_dev] = sd_dev
 
+	Debug("map_dm_to_sd_dev():  final_map = " + str(map))
 	Debug("def map_dm_to_sd_dev() exit")
 
 	return(map)
@@ -446,6 +448,7 @@ def map_mpath_to_sd_dev():
 
 		map[mpath] = sd_dev
 
+	Debug("map_mpath_to_sd_dev:: final_map = " + str(map))
 	Debug("def map_mpath_to_sd_dev() exit")
 
 	return(map)
@@ -489,6 +492,7 @@ def map_Dev_to_RID():
 
                 Map[This_Dev] = This_Rid
 
+        Debug("map_Dev_to_RID:: final_map = " + str(Map))
         Debug("def map_Dev_to_RID() exit")
 
         return(Map)
@@ -705,26 +709,58 @@ Debug("main:: map_es_to_sas_wwn = " + str(map_es_to_sas_wwn))
 ### Loop over enclosures to find the alias/backplane and add it to map_lsblk
 for sg_dev in map_es_to_sas_wwn:
 
-	num_slots = map_bp_slot[sg_dev]["num_slots"]
+	Debug("main:: Looking for " + sg_dev + " in map_bp_slot()")
 
-	for slot in map_es_to_sas_wwn[sg_dev]:
-		wwn_1 = map_es_to_sas_wwn[sg_dev][slot]["wwn"]
+	for key, dict in map_bp_slot.items():
 
-		sd_dev = Return_SD_Dev(wwn_1, map_lsblk)
-		Debug("main:: sg_dev " + str(sg_dev) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
+		actual_sg_dev = dict["sg_dev"]
+		num_slots     = dict["num_slots"]
+		alias         = dict["alias"]
 
-		map_lsblk[sd_dev]["backplane"] = sg_dev
-		map_lsblk[sd_dev]["slot"]      = slot
+		Debug("actual_sg_dev = " + str(actual_sg_dev) + " and num_slots = " + str(num_slots) + " and alias = " + str(alias))
 
-		# Since we're here, also add the backplane alias
-		bp_alias = "Unknown_BP"
-		if num_slots == 12:
-			bp_alias = "Back"
-		if num_slots == 24:
-			bp_alias = "Front"
-		map_lsblk[sd_dev]["bp_alias"] =  bp_alias
+		if sg_dev == actual_sg_dev:
+
+			for slot in map_es_to_sas_wwn[sg_dev]:
+				wwn_1 = map_es_to_sas_wwn[sg_dev][slot]["wwn"]
+
+				sd_dev = Return_SD_Dev(wwn_1, map_lsblk)
+				Debug("main:: sg_dev " + str(actual_sg_dev) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
+
+				map_lsblk[sd_dev]["backplane"] = actual_sg_dev
+				map_lsblk[sd_dev]["slot"]      = slot
+				map_lsblk[sd_dev]["bp_alias"]  = alias
+
+#	num_slots = map_bp_slot[sg_dev]["num_slots"]
+
+#	for slot in map_es_to_sas_wwn[sg_dev]:
+#		wwn_1 = map_es_to_sas_wwn[sg_dev][slot]["wwn"]
+
+#		sd_dev = Return_SD_Dev(wwn_1, map_lsblk)
+#		Debug("main:: sg_dev " + str(sg_dev) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
+#
+#		map_lsblk[sd_dev]["backplane"] = sg_dev
+#		map_lsblk[sd_dev]["slot"]      = slot
+#
+#		# Since we're here, also add the backplane alias
+#		bp_alias = "Unknown_BP"
+#		if num_slots == 12:
+#			bp_alias = "Back"
+#		if num_slots == 24:
+#			bp_alias = "Front"
+#		map_lsblk[sd_dev]["bp_alias"] =  bp_alias
 
 
+
+#root@cms-depot110:~/git/depot-tools# ./test_parse_lsblk.py 2>&1 | grep map_bp_slot
+#DEBUG: main:: map_bp_slot = {'/dev/null0': {'sg_dev': '/dev/sg12', 'hctl': '0:0:12:0', 'sas_wwn': '50015b2140a9e0bd', 'type': 'enclosu', 'num_slots': 12, 'alias': 'Back', 'enc_vendor': 'AIC 12G   product', 'enc_product': '2U12SAS3EOB'}, '/dev/null1': {'sg_dev': '/dev/sg37', 'hctl': '0:0:37:0', 'sas_wwn': '50015b2140afab3d', 'type': 'enclosu', 'num_slots': 24, 'alias': 'Front', 'enc_vendor': 'AIC 12G   product', 'enc_product': '4U24SAS3EOB'}}
+#    num_slots = map_bp_slot[sg_dev]["num_slots"]
+
+
+#Traceback (most recent call last):
+#  File "/root/git/depot-tools/./test_parse_lsblk.py", line 708, in <module>
+#    num_slots = map_bp_slot[sg_dev]["num_slots"]
+#KeyError: '/dev/sg12'
 
 
 ############################################################################
@@ -765,6 +801,18 @@ for sg_dev in map_es_to_sas_wwn:
 
 
 
+# map_lsblk = {'/dev/sda': {'KNAME': 'sda', 'PATH': '/dev/sda', 'MIN': '8:0', 'FSTYPE': 'mpath_member', 'PTUUID': 'b1ee35ee-fb32-4c39-8f76-2155cd3d9353', 'PTTYPE': 'gpt', 'RA': '128', 
+#                           'RO': '0', 'RM': '0', 'HOTPLUG': '0', 'MODEL': 'ST16000NM004J', 'SERIAL': 'ZR52MHA50000C148JCG5', 'SIZE': '256', 'STATE': 'running', 'OWNER': 'root', 'GROUP': 'disk', 
+#                           'MODE': 'brw-rw----', 'ALIGNMENT': '0', 'IO': '0', 'SEC': '512', 'ROTA': '1', 'SCHED': 'mq-deadline', 'TYPE': 'disk', 'ALN': '0', 'GRAN': '0B', 'MAX': '0B', 
+#                           'ZERO': '0', 'WSAME': '32M', 'WWN': '0x5000c500d773396b', 'RAND': '1', 'HCTL': '0:0:0:0', 'TRAN': 'sas', 'SUBSYSTEMS': 'block:scsi:pci', 'REV': 'E002', 'VENDOR': 'SEAGATE ', 
+#                           'ZONED': 'none', 'DAX': '0', 'sg_dev': '/dev/sg0', 'hctl': '0:0:0:0', 'lsscsi_wwn': '5000c500d773396b', 'backplane': '/dev/sg12', 'slot': '0', 'bp_alias': 'Back', 'locate_led': 'Off'},
+
+# main:: map_dev_to_rid = {'/dev/mapper/mpatha': '5425', 
+
+# We need to get sda -> dm11 -> mpathb info to add to the data structure, so we can get the RID.  :-/
+
+
+# We need to add mpath_dev, 
 
 
 
@@ -788,9 +836,11 @@ output = []
 # Iterate over map2 and build output list
 for sd_dev, dict in map_lsblk.items():
 
-	locate = dict["locate_led"]
-	rid    = dict["rid"]
-	alias  = dict["alias"]
+	Debug("Final sd_dev = " + str(sd_dev))
+
+	locate   = dict["locate_led"]
+	rid      = dict["rid"]
+	alias    = dict["alias"]
 	alias_bp = alias.split("_")[0]
 	alias_sl = alias.split("_")[1]
 
