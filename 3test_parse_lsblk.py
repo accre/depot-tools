@@ -127,10 +127,10 @@ def parse_lsblk():
 
 	map = {}
 
-	for line in SysExec(" lsblk -O -P").splitlines():
+	for line in SysExec("lsblk -O -P").splitlines():
 
 		# Parse all the keyval pairs
-		keyval  = dict(re.findall(r'(\w+)="([^"]+)"', line))
+		keyval  = dict(re.findall(r'(\w+)="([^"]+)"', re.sub("-", "_", line)))
 
 		# Fetch the sd_dev device and delete it from the keyval pair
 		name = keyval["NAME"]
@@ -195,21 +195,16 @@ def parse_lsblk_disks():
 		if map[key]["TYPE"] != "mpath":
 			continue
 
-		# keys to save are "NAME" (mpatha), "KNAME" (dm-0), "PATH" (/dev/mapper/mpatha), "PTUUID" (to match), "PKNAME" (sda)
-
+		# Keys to save are "NAME" (mpatha), "KNAME" (dm-0), "PATH" (/dev/mapper/mpatha), "PTUUID" (to match), "PKNAME" (sda)
 		for key2 in map2.keys():
 
 			if map2[key2]["PTUUID"] == map[key]["PTUUID"]:
-
-				Debug("foo map[key] = " + str(map[key]))
 
 				map2[key2]["MP_NAME"]   = key.split("/")[-1]
 				map2[key2]["MP_KNAME"]  = map[key]["KNAME"]
 				map2[key2]["MP_PKNAME"] = map[key]["PKNAME"]
 				map2[key2]["MP_PATH"]   = map[key]["PATH"]
 				break
-
-	# foobar
 
 	Debug("parse_lsblk_disks():: final_map = " + str(map))
 	Debug("def parse_lsblk_disks() exit")
@@ -694,7 +689,6 @@ def Return_SD_Dev(wwn_1, map):
 
 	return("UNKNOWN")
 
-
 ### Main()
 
 ### Determine whether multipathing is enabled or not.
@@ -764,7 +758,14 @@ for sg_dev in map_es_to_sas_wwn:
 # Add the RID to map_lsblk
 
 for key in map_lsblk.keys():
-	map_lsblk[key]["RID"] = map_dev_to_rid[map_lsblk[key]["MP_PATH"]]
+
+	bd = key
+	if multipath_active:
+		bd = map_lsblk[key]["MP_PATH"]
+
+	map_lsblk[key]["RID"] = map_dev_to_rid[bd]
+
+
 
 
 
@@ -786,20 +787,37 @@ output = []
 # Iterate over map2 and build output list
 for sd_dev, dict in map_lsblk.items():
 
-	locate   = dict["locate_led"]
-	rid      = dict["RID"]
-	alias_bp = dict["bp_alias"]
-	slot     = dict["slot"]
+	locate   = str(dict["locate_led"])
+	rid      = str(dict["RID"])
+	alias_bp = str(dict["bp_alias"])
+	slot     = str(dict["slot"])
 
-	vendor   = dict["VENDOR"]
-	model    = dict["MODEL"]
-	serial   = dict["SERIAL"]
-	firmware = dict["REV"]
+	vendor   = str(dict["VENDOR"])
+	model    = str(dict["MODEL"])
+	serial   = str(dict["SERIAL"])
+	firmware = str(dict["REV"])
 
-	trans   = dict["TRAN"]
-	rota    = dict["ROTA"]
-	type	= dict["TYPE"]
-	sg_dev  = dict["sg_dev"]
+# Compute the drive size in MiB from the reported MB scale
+	size     = str(dict["SIZE"])
+	size_num = float(size[:-1])
+	size_sca = size[-1]
+
+	multiplier = 0
+	if size_sca == "K":
+		multiplier = pow(1024 / 1000, 1)
+	if size_sca == "M":
+		multiplier = pow(1024 / 1000, 2)
+	if size_sca == "G":
+		multiplier = pow(1024 / 1000, 3)
+	if size_sca == "T":
+		multiplier = pow(1024 / 1000, 4)
+
+	if multiplier:
+		size = str(round(size_num * multiplier)) + size_sca
+
+	rota    = str(dict["ROTA"])
+	type	= str(dict["TYPE"])
+	sg_dev  = str(dict["sg_dev"])
 
 	if rota == "1":
 		rota_txt = "hd"
@@ -808,23 +826,17 @@ for sd_dev, dict in map_lsblk.items():
 	else:
 		rota_txt = "unknown"
 
-	type_rota = type + ":" + rota_txt
+	type_rota = str(type + ":" + rota_txt)
 
-	wwn     = dict["WWN"]   # Or maybe lssscsi_wwn
+	wwn     = str(dict["WWN"])   # Or maybe lssscsi_wwn
 
 	bd = sd_dev
 	if multipath_active:
-		bd     = dict["MP_PATH"]
+		bd     = str(dict["MP_PATH"])
 
-	# This output is for "lsslot"
-	#output.append([alias_bp, slot, locate, bd, rid])
+	output.append([alias_bp, slot, bd, vendor, model, serial, firmware, type_rota, size, rid, locate])
 
-	output.append([alias_bp, slot, bd, rid, sg_dev, locate, vendor, model, serial, firmware, trans, type_rota])
-
-# This output is for "lsslot"
-#x = PrettyTable(["Backplane", "Slot", "Locate LED", "Dev", "RID"])
-
-x = PrettyTable(["Backplane", "Slot", "Dev", "Rid", "SG_Dev", "Locate", "Vendor", "Model", "Serial", "Firmware", "Trans", "Media"])
+x = PrettyTable(["Backplane", "Slot", "Dev", "Vendor", "Model", "Serial", "Firmware", "Media", "Size", "Rid", "Locate"])
 x.padding_width = 1
 x.align = "l"
 for row in output:
