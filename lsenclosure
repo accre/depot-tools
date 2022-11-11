@@ -650,6 +650,7 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
         slot = ""
         sas_wwn = ""
 
+        Debug("map_sg_ses_enclosure_slot_to_sas_wwn:: sg_dev = " + str(sg_dev))
 
         for line in SysExec("sg_ses -p aes " + str(sg_dev)).splitlines():
 
@@ -684,7 +685,9 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
                 sas_wwn = line.split(":")[1].strip()
 
                 if protocol == "SATA":
-                    sas_wwn = map_wwn[sas_wwn]
+
+                    if sas_wwn in map_wwn:
+                        sas_wwn = map_wwn[sas_wwn]
 
                 if sas_wwn == "0x0":
                     sas_wwn = "EMPTY"
@@ -977,7 +980,10 @@ for key, d in map_lsblk.items():
     if multipath_active:
         bd = d["MP_PATH"]
 
-    map_lsblk[key]["RID"] = dev_to_rid_map[bd]
+    if bd in dev_to_rid_map:
+        map_lsblk[key]["RID"] = dev_to_rid_map[bd]
+    else:
+        map_lsblk[key]["RID"] = "NORID"
 
 
 ### Add the locate LED status to map_lsblk
