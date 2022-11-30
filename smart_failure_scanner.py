@@ -257,8 +257,8 @@ def Get_SASController():
 	if not SAS_Controller:
 		SAS_Controller = [ "Unknown" ]
 
-	if len(SAS_Controller) == 1:
-		SAS_Controller = SAS_Controller[0]
+#	if len(SAS_Controller) == 1:
+#		SAS_Controller = SAS_Controller[0]
 
 	Debug("Get_SASController()::  SAS Controller type = " + str(SAS_Controller))
 
