@@ -231,9 +231,10 @@ def printDev(Dev, Str):
 def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
 
 	if Vendor == "SEAGATE":
-		Serial = Serial[0:8]
+		if Serial:
+			Serial = Serial[0:8]
 
-	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + ", serial " + Serial + "] - " + Str)
+	print(socket.gethostname() + " " + str(Dev) + " [" + str(Vendor) + " " + str(Model) + ", serial " + str(Serial) + "] - " + str(Str))
 
 
 
@@ -264,21 +265,23 @@ def Get_SASController():
 	if "Unknown" in SAS_Controller:
 		Debug("Get_SASController()::  There is an unknown controller type in this system.")
 
-	if re.search("Invader", SAS_Controller):
-		SAS_Controller = "LSI_Invader"
+	SAS_Controller_List = []
 
-	if re.search("Falcon", SAS_Controller):
-		SAS_Controller = "LSI_Falcon"
+	if any(re.search("Invader", entry) for entry in SAS_Controller):
+		SAS_Controller_List.append("LSI_Invader")
 
-	if re.search("Thunderbolt", SAS_Controller):
-		SAS_Controller = "LSI_Thunderbolt"
+	if any(re.search("Falcon", entry) for entry in SAS_Controller):
+		SAS_Controller_List.append("LSI_Falcon")
 
-	if re.search("Tri-Mode", SAS_Controller):
-		SAS_Controller = "LSI_Trimode"
+	if any(re.search("Thunderbolt", entry) for entry in SAS_Controller):
+		SAS_Controller_List.append("LSI_Thunderbolt")
+
+	if any(re.search("Tri-Mode", entry) for entry in SAS_Controller):
+		SAS_Controller_List.append("LSI_Trimode")
 
 	Debug("Get_SASController():: function exit")
 
-	return(SAS_Controller)
+	return(SAS_Controller_List)
 
 
 def get_errors_from_storcli():
@@ -307,25 +310,25 @@ def get_errors_from_storcli():
 		if "Drive" in locals() and "Model" in locals():
 			if Drive is not None and Model is not None:
 
-				Debug(Drive + " " + Vendor + " " + Model + " " + Serial + " " + str(Shield_Counter) + " " + str(Media_Error_Count) + " " + str(Other_Error_Count) + " " + str(Predictive_Failure_Count) + " " + str(SMART_alert))
+				Debug(str(Drive) + " " + str(Vendor) + " " + str(Model) + " " + str(Serial) + " " + str(Shield_Counter) + " " + str(Media_Error_Count) + " " + str(Other_Error_Count) + " " + str(Predictive_Failure_Count) + " " + str(SMART_alert))
 
-				if Shield_Counter != 0:
+				if Shield_Counter != 0 and Shield_Counter != "N/A":
 					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Shield Counter = " + str(Shield_Counter))
 				Shield_Counter = None
 
-				if Media_Error_Count != 0:
+				if Media_Error_Count != 0 and Media_Error_Count != "N/A":
 					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Media Error Count = " + str(Media_Error_Count))
 				Media_Error_Count = None
 
-				if Other_Error_Count != 0:
+				if Other_Error_Count != 0 and Other_Error_Count != "N/A":
 					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Other Error Count = " + str(Other_Error_Count))
 				Other_Error_Count = None
 
-				if Predictive_Failure_Count != 0:
+				if Predictive_Failure_Count != 0 and Predictive_Failure_Count != "N/A":
 					printDevVirt_storcli(Drive, Vendor, Model, Serial, "Predictive Failure Count = " + str(Predictive_Failure_Count))
 				Predictive_Failure_Count = None
 
-				if SMART_alert != "No":
+				if SMART_alert != "No" and SMART_alert != "N/A":
 					printDevVirt_storcli(Drive, Vendor, Model, Serial, "SMART alert flagged by drive = " + str(SMART_alert))
 				SMART_alert = None
 
@@ -338,16 +341,28 @@ def get_errors_from_storcli():
 			Drive = line.split()[1]
 
 		if re.search("Shield Counter", line):
-			Shield_Counter = int(line.split("=")[1].strip())
+			if re.search("N/A", line):
+				Shield_Counter = "N/A"
+			else:
+				Shield_Counter = int(line.split("=")[1].strip())
 
 		if re.search("Media Error Count", line):
-			Media_Error_Count = int(line.split("=")[1].strip())
+			if re.search("N/A", line):
+				Media_Error_Count = "N/A"
+			else:
+				Media_Error_Count = int(line.split("=")[1].strip())
 
 		if re.search("Other Error Count", line):
-			Other_Error_Count = int(line.split("=")[1].strip())
+			if re.search("N/A", line):
+				Other_Error_Count = "N/A"
+			else:
+				Other_Error_Count = int(line.split("=")[1].strip())
 
 		if re.search("Predictive Failure Count", line):
-			Predictive_Failure_Count = int(line.split("=")[1].strip())
+			if re.search("N/A", line):
+				Predictive_Failure_Count = "N/A"
+			else:
+				Predictive_Failure_Count = int(line.split("=")[1].strip())
 
 		if re.search("S.M.A.R.T alert flagged by drive", line):
 			SMART_alert = line.split("=")[1].strip()
@@ -442,7 +457,7 @@ if "Virtual" in Drive_Transport.values():
 	SAS_Controller = Get_SASController()
 	Debug("SAS_Controller = " + str(SAS_Controller))
 
-	if SAS_Controller == "LSI_Invader":
+	if "LSI_Invader" in SAS_Controller or "LSI_Trimode" in SAS_Controller:
 		get_errors_from_storcli()
 
 
