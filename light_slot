@@ -107,6 +107,11 @@ def Get_SASController():
                         SAS_Controller = "LSI_FusionMPT"
                         break
 
+		# Our 5th gen SAS controller
+		if re.search(r"LSI Fusion-MPT 12GSAS/PCIe Secure SAS38xx", line):
+			SAS_Controller = "LSI_FusionMPT"
+			break
+
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
 
 	if SAS_Controller == "Unknown":
