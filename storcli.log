@@ -512,3 +512,104 @@ Tue Jun 14 17:03:51.895 2022 : StorelibItDp::processLibCommand SL request sent
 Tue Jun 14 17:03:51.895 2022 : StorelibItDp::processLibCommand SL responded with retcode=0
 Tue Jun 14 17:03:51.895 2022 : CtMain::main command completed with retcode=0
 
+Fri Feb  3 16:12:19.170 2023 : CtMain::main processing for command=/ c 0 show 
+Fri Feb  3 16:12:19.182 2023 : Entering LinuxControllerExplorer::explore 
+Fri Feb  3 16:12:19.182 2023 : Entering LinuxControllerExplorer::getCtrlCount
+Fri Feb  3 16:12:19.183 2023 : LinuxControllerExplorer::getCtrlCount _hDvr=4 _hDvrSwr =-1
+Fri Feb  3 16:12:19.183 2023 : LinuxControllerExplorer::getCtrlCount kernelVer=1 
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: classpath = /sys/class/scsi_host
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host5
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host5
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host5/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = ahci
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host3
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host3
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host3/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = ahci
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host1
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host1
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host1/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = ahci
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host6
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host6
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host6/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = ahci
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host4
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host4
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host4/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = ahci
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host2
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host2
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host2/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = ahci
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: direntry->d_name = host0
+
+Fri Feb  3 16:12:19.183 2023 : cli_sysfs_scan_for_new_devices: path = /sys/class/scsi_host/host0
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host0/proc_name
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: drvname = megaraid_sas
+
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: megaraid_sas driver found
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path = /sys/class/scsi_host/host0/device
+
+Fri Feb  3 16:12:19.183 2023 : cli_get_adapter_map: path /sys/class/scsi_host/host0/device is link
+Fri Feb  3 16:12:19.184 2023 : cli_get_adapter_map: devicedir = /sys/devices/pci0000:00/0000:00:01.0/0000:01:00.0/host0
+
+Fri Feb  3 16:12:19.184 2023 : cli_get_adapter_map: host_no = 0
+
+Fri Feb  3 16:12:19.184 2023 : cli_get_adapter_map: domain=0, bus=1 slot=0 func=0
+
+Fri Feb  3 16:12:19.184 2023 : cli_sysfs_scan_for_new_devices:  Exiting rval 0xFFFFFFFF
+
+Fri Feb  3 16:12:19.184 2023 : controller count as per dev node list=1 
+Fri Feb  3 16:12:19.184 2023 : LinuxControllerExplorer::explore ctrlCount=1
+Fri Feb  3 16:12:19.184 2023 : returning LinuxControllerExplorer::explore ctrlIdListPtr
+Fri Feb  3 16:12:19.184 2023 : SlItControllerExplorer::explore - Entering
+Fri Feb  3 16:12:19.184 2023 : StorelibItDp::processLibCommand SL request sent
+Fri Feb  3 16:12:19.197 2023 : StorelibItDp::processLibCommand SL responded with retcode=32770
+Fri Feb  3 16:12:19.197 2023 : LinuxMfiDataProvider::fireIoctl DCMD=1010000 mbox.w[0]=1 mbox.w[1]=0 mbox.w[2]=0
+Fri Feb  3 16:12:19.198 2023 : LinuxMfiDataProvider::fireIoctl send_ioctl retcode=0 cmdStatus=0
+Fri Feb  3 16:12:19.198 2023 : LinuxMfiDataProvider::fireIoctl returning with =0 errno=2
+Fri Feb  3 16:12:19.198 2023 : LinuxMfiDataProvider::fireIoctl DCMD=10e8481 mbox.w[0]=0 mbox.w[1]=0 mbox.w[2]=0
+Fri Feb  3 16:12:19.198 2023 : LinuxMfiDataProvider::fireIoctl send_ioctl retcode=0 cmdStatus=0
+Fri Feb  3 16:12:19.198 2023 : LinuxMfiDataProvider::fireIoctl returning with =0 errno=2
+Fri Feb  3 16:12:19.221 2023 : StorelibItDp::processLibCommand SL request sent
+Fri Feb  3 16:12:19.222 2023 : StorelibItDp::processLibCommand SL responded with retcode=32770
+Fri Feb  3 16:12:19.222 2023 : StorelibItDp::processLibCommand SL request sent
+Fri Feb  3 16:12:19.222 2023 : StorelibItDp::processLibCommand SL responded with retcode=32770
+Fri Feb  3 16:12:19.222 2023 : CtMain::main command completed with retcode=0
+

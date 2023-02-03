@@ -16,7 +16,7 @@ CacheDataArray = {}
 CacheTimeArray = {}
 
 # Set "True" to print debugging info
-Print_Debug = False
+Print_Debug = True
 
 # Do we want to be "Picky" or "Practical".
 # "Picky" sets reporting thresholds to 0, so a single error will report a message
@@ -296,6 +296,8 @@ def get_errors_from_storcli():
 	else:
 		STORCLI_Bin = "storcli64"
 
+	Debug("get_errors_from_storcli():: STORCLI_Bin = " + str(STORCLI_Bin))
+
 	output = SysExec(STORCLI_Bin + " /cALL/eALL/sALL show all")
 
 	for line in output.splitlines():
@@ -399,7 +401,7 @@ Debug("Block devices found: " + str(Devs))
 # all drives in parallel then wait for them to complete to speed up access later
 jobs = []
 for Dev in Devs:
-#	Debug("Spawning SysExec 'smartctl -x' process on Dev " + Dev)
+	Debug("Spawning SysExec 'smartctl -x' process on Dev " + Dev)
 	p = threading.Thread(target = SysExec, args = ("smartctl -x " + Dev, ))
 	jobs.append(p)
 	p.start()
@@ -420,10 +422,15 @@ for Dev in Devs:
 	if HD_Size == 0:
 		printDev(Dev, "Disk size = 0 bytes, apparent media failure")
 
-
 	# Find out if the drive is SATA or SAS
 	Drive_Transport[Dev] = "SATA"   # By default
 	for line in SysExec("smartctl -x " + Dev).splitlines():
+
+
+		# Dell firmware is a lying SOB...
+		if re.search("PERC", line):
+			Drive_Transport[Dev] = "Virtual"
+			break
 
 		if re.search("DELL or MegaRaid controller, please try adding", line):
 			Drive_Transport[Dev] = "Virtual"
@@ -457,13 +464,15 @@ if "Virtual" in Drive_Transport.values():
 	SAS_Controller = Get_SASController()
 	Debug("SAS_Controller = " + str(SAS_Controller))
 
-	if "LSI_Invader" in SAS_Controller or "LSI_Trimode" in SAS_Controller:
+	if "LSI_Invader" in SAS_Controller or "LSI_Trimode" in SAS_Controller or "LSI_Thunderbolt" in SAS_Controller:
 		get_errors_from_storcli()
 
 
 for Dev in Devs:
 
 	Debug("Scanning drive " + str(Dev) + "...")
+
+	Debug("Drive Transport for " + str(Dev) + " is " + str(Drive_Transport[Dev]))
 
 	if Drive_Transport[Dev] == "SATA":
 
