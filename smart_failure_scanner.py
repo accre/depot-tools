@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 
 import os
 import re
@@ -390,7 +390,7 @@ Output = os.listdir("/sys/block")
 for line in Output:
 
 	# Skip various non-block devices
-	if re.search("^loop|^ram|^dm|^zram|^md|^sr", line):
+	if re.search("^loop|^ram|^dm|^zram|^md|^zd|^sr", line):
 		continue
 
 	Devs.append("/dev/" + line)
