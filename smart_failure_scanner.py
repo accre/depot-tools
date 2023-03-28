@@ -16,7 +16,7 @@ CacheDataArray = {}
 CacheTimeArray = {}
 
 # Set "True" to print debugging info
-Print_Debug = True
+Print_Debug = False
 
 # Do we want to be "Picky" or "Practical".
 # "Picky" sets reporting thresholds to 0, so a single error will report a message
@@ -481,6 +481,8 @@ for Dev in Devs:
 
 			line = line.strip() # Remove leading spaces
 
+			Debug("line = " + str(line))
+
 			# SMART attribute lines all start with numbers (after stripping leading spaces)
 			if not re.search("^[0-9]", line):
 				continue
@@ -492,7 +494,7 @@ for Dev in Devs:
 			if re.search("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]", line):
 				continue
 
-			if re.search("Not_testing|Read_scanning|% of test", line):
+			if re.search("Not_testing|Read_scanning|% of test|failed self-tests are outdated", line):
 				continue
 
 			if re.search("[0-9a-f][0-9a-f] [0-9a-f][0-9a-f] [0-9a-f][0-9a-f]", line):
