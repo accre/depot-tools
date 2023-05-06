@@ -447,7 +447,7 @@ def Get_IBP_Server_Version():
             print("ERROR:  Couldn't parse build date from binary")
             sys.exit(2)
 
-    if build_date != "UNKOWN":
+    if build_date != "UNKNOWN":
         build_timestamp = str(time.mktime(datetime.datetime.strptime(
             build_date, s_fmt).timetuple())).split(".")[0]
 
