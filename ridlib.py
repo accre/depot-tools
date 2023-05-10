@@ -451,9 +451,9 @@ def Get_IBP_Server_Version():
         build_timestamp = str(time.mktime(datetime.datetime.strptime(
             build_date, s_fmt).timetuple())).split(".")[0]
 
-    logging.debug("Build date = " + build_date + "|" + build_timestamp)
+    logging.debug("Build date = " + str(build_date) + "|" + str(build_timestamp))
 
-    return build_date + "|" + build_timestamp
+    return str(build_date) + "|" + str(build_timestamp)
 
 
 def RID_Mount(Rid):
