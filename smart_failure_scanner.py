@@ -524,10 +524,10 @@ for Dev in Devs:
 			if smart_attributes["id"] == "9":
 				continue
 
-			if not isnumeric(smart_attributes["value"]):
+			if not smart_attributes["value"].isnumeric():
 				printDev(dev, "value is not numeric: ", smart_attributes["value"])
 
-			if not isnumeric(smart_attributes["thresh"]):
+			if not smart_attributes["thresh"].isnumeric():
 				printDev(dev, "thresh is not numeric: ", smart_attributes["thresh"])
 
 			Delta = int(smart_attributes["value"]) - int(smart_attributes["thresh"])
