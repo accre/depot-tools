@@ -231,6 +231,12 @@ def Get_SASController():
 			SAS_Controller = "LSI_FusionMPT"
 			break
 
+		# New depots
+		if re.search(r"Fusion-MPT 12GSAS/PCIe Secure SAS38xx", line):
+			SAS_Controller = "LSI_FusionMPT"
+			break
+
+
 	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
 
 	if SAS_Controller == "Unknown":
