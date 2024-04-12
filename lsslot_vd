@@ -89,6 +89,7 @@ def List_Enclosures():
         # Our current depots have 24 slots on the Front backplane and 12 on the Rear
         # In a more complex setup, we might need a more cumbersome way to alias backplanes
         Alias_by_NumSlots = {}
+        Alias_by_NumSlots["36"] = "Unified"
         Alias_by_NumSlots["24"] = "Front"
         Alias_by_NumSlots["12"] = "Back"
 
