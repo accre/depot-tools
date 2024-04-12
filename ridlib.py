@@ -1534,6 +1534,9 @@ def Query_Drives_Smart_Attributes(Query):
         if re.search("^ram", line):
             continue
 
+        if re.search("^zram", line):
+            continue
+
         if re.search("^dm-", line):
             continue
 
