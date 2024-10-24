@@ -160,7 +160,7 @@ def FindBackplanes():
 
 if len(sys.argv) != 4:
 	print("\n" + sys.argv[0] + " - Turn on/off a LED on a slot")
-	print("\nUsage: " + sys.argv[0] + " [front|back] [slot#] [on|off]\n")
+	print("\nUsage: " + sys.argv[0] + " [backplane] [slot#] [on|off]\n")
 	sys.exit()
 
 SAS_Controller = Get_SASController()

@@ -17,7 +17,7 @@ CACHE_DATA_ARRAY = {}
 CACHE_TIME_ARRAY = {}
 
 # Enable/disable debugging messages
-PRINT_DEBUG = False
+PRINT_DEBUG = True
 
 def Debug(input_txt):
 
@@ -602,7 +602,6 @@ def map_enclosures():
             if re.search("Element index:", i):
                 num_slots = num_slots + 1
 
-
         map_lsscsi[sd_dev]["num_slots"] = num_slots
 
         if num_slots == 12:
@@ -610,6 +609,9 @@ def map_enclosures():
 
         if num_slots == 24:
             map_lsscsi[sd_dev]["alias"] = "Front"
+
+        if num_slots == 31:
+            map_lsscsi[sd_dev]["alias"] = "Valiant"
 
         for line in SysExec("sg_ses -p cf " + sg_dev).splitlines():
 
@@ -951,6 +953,8 @@ for sg_dev in map_es_to_sas_wwn:
 
     for key, d in map_bp_slot.items():
 
+        print("FOOBAR! key = " + str(key) + " and d = " + str(d))
+
         actual_sg_dev = d["sg_dev"]
         num_slots = d["num_slots"]
         alias = d["alias"]
@@ -959,6 +963,8 @@ for sg_dev in map_es_to_sas_wwn:
               str(num_slots) + " and alias = " + str(alias))
 
         if sg_dev == actual_sg_dev:
+
+            print("XYZZY map_es_to_sas_wwn = " + str(map_es_to_sas_wwn))
 
             for slot in map_es_to_sas_wwn[sg_dev]:
                 wwn_1 = map_es_to_sas_wwn[sg_dev][slot]["wwn"]
