@@ -1,0 +1,462 @@
+------------Debug log started ini=0 level=4-----
+Thu Oct 24 20:30:11.318 2024 : CtMain::main processing for command=/ c 0 show 
+Thu Oct 24 20:30:11.318 2024 : Entering LinuxControllerExplorer::explore 
+Thu Oct 24 20:30:11.318 2024 : Entering LinuxControllerExplorer::getCtrlCount
+Thu Oct 24 20:30:11.318 2024 : LinuxControllerExplorer::getCtrlCount _hDvr=-1 _hDvrSwr =-1
+Thu Oct 24 20:30:11.318 2024 : LinuxControllerExplorer::explore ctrlCount=1
+Thu Oct 24 20:30:11.318 2024 : returning LinuxControllerExplorer::explore ctrlIdListPtr
+Thu Oct 24 20:30:11.318 2024 : SlItControllerExplorer::explore - Entering
+Thu Oct 24 20:30:11.318 2024 : SlItControllerExplorer::explore - Getting the StoreLIB instance for SAS3.5 IT controller
+Thu Oct 24 20:30:11.318 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.493 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.493 2024 : SlItControllerExplorer::explore - Issuing SL_GET_CTRL_LIST to SLIT
+Thu Oct 24 20:30:11.493 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.493 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.493 2024 : SlItControllerExplorer::explore - Issuing SL_GET_CTRL_LIST to SLIT - retCode:0x0
+Thu Oct 24 20:30:11.493 2024 : SlItControllerExplorer::explore - Controller count:2
+Thu Oct 24 20:30:11.493 2024 : SlItControllerExplorer::explore - Controller count index:0
+Thu Oct 24 20:30:11.493 2024 : SlItControllerExplorer::explore - Issuing SL_GET_PCI_INFO to SLIT
+Thu Oct 24 20:30:11.493 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.494 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.494 2024 : SlItControllerExplorer::explore - Issuing SL_GET_PCI_INFO to SLIT - retCode:0x0
+Thu Oct 24 20:30:11.494 2024 : SlItControllerExplorer::explore - Domain:0 Bus:49 device:0 Function:0
+Thu Oct 24 20:30:11.494 2024 : SlItControllerExplorer::explore - Issuing SL_GET_CTRL_INFO to SLIT
+Thu Oct 24 20:30:11.494 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.545 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.545 2024 : SlItControllerExplorer::explore - Issuing SL_GET_CTRL_INFO to SLIT - retCode:0x0
+Thu Oct 24 20:30:11.545 2024 : SlItControllerExplorer::explore - Adapter is good
+Thu Oct 24 20:30:11.545 2024 : SlItControllerExplorer::explore - Controller count index:1
+Thu Oct 24 20:30:11.545 2024 : SlItControllerExplorer::explore - Issuing SL_GET_PCI_INFO to SLIT
+Thu Oct 24 20:30:11.545 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.546 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.546 2024 : SlItControllerExplorer::explore - Issuing SL_GET_PCI_INFO to SLIT - retCode:0x0
+Thu Oct 24 20:30:11.546 2024 : SlItControllerExplorer::explore - Domain:0 Bus:177 device:0 Function:0
+Thu Oct 24 20:30:11.546 2024 : SlItControllerExplorer::explore - Issuing SL_GET_CTRL_INFO to SLIT
+Thu Oct 24 20:30:11.546 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.596 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.596 2024 : SlItControllerExplorer::explore - Issuing SL_GET_CTRL_INFO to SLIT - retCode:0x0
+Thu Oct 24 20:30:11.596 2024 : SlItControllerExplorer::explore - Adapter is good
+Thu Oct 24 20:30:11.596 2024 : LinuxMfiDataProvider::fireIoctl DCMD=1010000 mbox.w[0]=1 mbox.w[1]=0 mbox.w[2]=0
+Thu Oct 24 20:30:11.596 2024 : LinuxMfiDataProvider::fireIoctl send_ioctl retcode=-1 cmdStatus=255
+Thu Oct 24 20:30:11.596 2024 : LinuxMfiDataProvider::fireIoctl returning with =-1 errno=2
+Thu Oct 24 20:30:11.596 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.647 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.647 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.698 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.700 2024 : Entering MWCliRootCp::process ver=007.2908.0000.0000 Mar 04, 2024 copyright=2024
+Thu Oct 24 20:30:11.700 2024 : initializing the RaidManager Instance 
+Thu Oct 24 20:30:11.700 2024 : Entering ITSwCtPrCp::process
+Thu Oct 24 20:30:11.700 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.700 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.751 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.751 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.751 2024 : ITSwCtPrCp::process - Retreiving basic controller info
+Thu Oct 24 20:30:11.751 2024 : Entering ITSwCtPrCp::getBasicCtrlInfo
+Thu Oct 24 20:30:11.751 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.751 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.802 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.802 2024 : Entering ITSwCtPrCp::getPciInfo
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.802 2024 : Exiting ITSwCtPrCp::getPciInfo
+Thu Oct 24 20:30:11.802 2024 : Entering ITSwCtPrCp::getDriverInfo
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.802 2024 : Exiting ITSwCtPrCp::getDriverInfo
+Thu Oct 24 20:30:11.802 2024 : Entering ITUtils::GetManufacturingPage0
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.802 2024 : Exiting ITUtils::GetManufacturingPage0
+Thu Oct 24 20:30:11.802 2024 : ITUtils::isPlatformSecSupported - Getting controller information...
+Thu Oct 24 20:30:11.802 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.802 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.853 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.853 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.853 2024 : ITUtils::isPlatformSecSupported - getSlCtrlInfo retCode:0
+Thu Oct 24 20:30:11.853 2024 : Exiting ITSwCtPrCp::getBasicCtrlInfo
+Thu Oct 24 20:30:11.853 2024 : ITSwCtPrCp::process - Retreiving drive information
+Thu Oct 24 20:30:11.853 2024 : Entering ITSwCtPrCp::getPdInfoTable
+Thu Oct 24 20:30:11.853 2024 : Entering ITUtils::GetPdList
+Thu Oct 24 20:30:11.853 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.853 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.853 2024 : Exiting ITUtils::GetPdList
+Thu Oct 24 20:30:11.853 2024 : Entering ITSwCtPrCp::createSortedPdData
+Thu Oct 24 20:30:11.853 2024 : Exiting ITSwCtPrCp::createSortedPdData
+Thu Oct 24 20:30:11.853 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.853 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.853 2024 : Entering ITUtils::slGetPdInfo deviceId=30
+Thu Oct 24 20:30:11.853 2024 : Entering ITUtils::getPdInfo for devid=30
+Thu Oct 24 20:30:11.853 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.854 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.854 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:11.854 2024 : ITUtils::slGetPdInfo  pdfwstate=30 scsiDevType =13
+Thu Oct 24 20:30:11.854 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:11.854 2024 : Entering ITUtils::slGetPdInfo deviceId=0
+Thu Oct 24 20:30:11.854 2024 : Entering ITUtils::getPdInfo for devid=0
+Thu Oct 24 20:30:11.854 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.857 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.857 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:11.857 2024 : ITUtils::slGetPdInfo  pdfwstate=0 scsiDevType =0
+Thu Oct 24 20:30:11.857 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:11.857 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.857 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.908 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.908 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.908 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:11.908 2024 : Entering ITUtils::slGetPdInfo deviceId=1
+Thu Oct 24 20:30:11.908 2024 : Entering ITUtils::getPdInfo for devid=1
+Thu Oct 24 20:30:11.908 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.910 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.910 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:11.910 2024 : ITUtils::slGetPdInfo  pdfwstate=1 scsiDevType =0
+Thu Oct 24 20:30:11.910 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:11.910 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.910 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.961 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.961 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.961 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:11.961 2024 : Entering ITUtils::slGetPdInfo deviceId=2
+Thu Oct 24 20:30:11.961 2024 : Entering ITUtils::getPdInfo for devid=2
+Thu Oct 24 20:30:11.961 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:11.966 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:11.966 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:11.966 2024 : ITUtils::slGetPdInfo  pdfwstate=2 scsiDevType =0
+Thu Oct 24 20:30:11.966 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:11.966 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:11.966 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.017 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.017 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.017 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.017 2024 : Entering ITUtils::slGetPdInfo deviceId=3
+Thu Oct 24 20:30:12.017 2024 : Entering ITUtils::getPdInfo for devid=3
+Thu Oct 24 20:30:12.017 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.019 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.019 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.019 2024 : ITUtils::slGetPdInfo  pdfwstate=3 scsiDevType =0
+Thu Oct 24 20:30:12.019 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.019 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.019 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.070 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.070 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.070 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.070 2024 : Entering ITUtils::slGetPdInfo deviceId=4
+Thu Oct 24 20:30:12.070 2024 : Entering ITUtils::getPdInfo for devid=4
+Thu Oct 24 20:30:12.070 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.073 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.073 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.073 2024 : ITUtils::slGetPdInfo  pdfwstate=4 scsiDevType =0
+Thu Oct 24 20:30:12.073 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.073 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.073 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.124 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.124 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.124 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.124 2024 : Entering ITUtils::slGetPdInfo deviceId=5
+Thu Oct 24 20:30:12.124 2024 : Entering ITUtils::getPdInfo for devid=5
+Thu Oct 24 20:30:12.124 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.126 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.126 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.126 2024 : ITUtils::slGetPdInfo  pdfwstate=5 scsiDevType =0
+Thu Oct 24 20:30:12.126 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.126 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.126 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.177 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.177 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.177 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.177 2024 : Entering ITUtils::slGetPdInfo deviceId=6
+Thu Oct 24 20:30:12.177 2024 : Entering ITUtils::getPdInfo for devid=6
+Thu Oct 24 20:30:12.177 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.183 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.183 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.183 2024 : ITUtils::slGetPdInfo  pdfwstate=6 scsiDevType =0
+Thu Oct 24 20:30:12.183 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.183 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.183 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.234 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.234 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.234 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.234 2024 : Entering ITUtils::slGetPdInfo deviceId=7
+Thu Oct 24 20:30:12.234 2024 : Entering ITUtils::getPdInfo for devid=7
+Thu Oct 24 20:30:12.234 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.237 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.237 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.237 2024 : ITUtils::slGetPdInfo  pdfwstate=7 scsiDevType =0
+Thu Oct 24 20:30:12.237 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.237 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.237 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.288 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.288 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.288 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.288 2024 : Entering ITUtils::slGetPdInfo deviceId=8
+Thu Oct 24 20:30:12.288 2024 : Entering ITUtils::getPdInfo for devid=8
+Thu Oct 24 20:30:12.288 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.294 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.294 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.294 2024 : ITUtils::slGetPdInfo  pdfwstate=8 scsiDevType =0
+Thu Oct 24 20:30:12.294 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.294 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.294 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.345 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.345 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.345 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.345 2024 : Entering ITUtils::slGetPdInfo deviceId=9
+Thu Oct 24 20:30:12.345 2024 : Entering ITUtils::getPdInfo for devid=9
+Thu Oct 24 20:30:12.345 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.348 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.348 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.348 2024 : ITUtils::slGetPdInfo  pdfwstate=9 scsiDevType =0
+Thu Oct 24 20:30:12.348 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.348 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.348 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.399 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.399 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.399 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.399 2024 : Entering ITUtils::slGetPdInfo deviceId=10
+Thu Oct 24 20:30:12.399 2024 : Entering ITUtils::getPdInfo for devid=10
+Thu Oct 24 20:30:12.399 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.401 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.401 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.401 2024 : ITUtils::slGetPdInfo  pdfwstate=10 scsiDevType =0
+Thu Oct 24 20:30:12.401 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.401 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.401 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.452 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.452 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.452 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.452 2024 : Entering ITUtils::slGetPdInfo deviceId=11
+Thu Oct 24 20:30:12.452 2024 : Entering ITUtils::getPdInfo for devid=11
+Thu Oct 24 20:30:12.452 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.454 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.454 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.454 2024 : ITUtils::slGetPdInfo  pdfwstate=11 scsiDevType =0
+Thu Oct 24 20:30:12.454 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.454 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.454 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.505 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.505 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.505 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.505 2024 : Entering ITUtils::slGetPdInfo deviceId=12
+Thu Oct 24 20:30:12.505 2024 : Entering ITUtils::getPdInfo for devid=12
+Thu Oct 24 20:30:12.505 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.508 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.508 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.508 2024 : ITUtils::slGetPdInfo  pdfwstate=12 scsiDevType =0
+Thu Oct 24 20:30:12.508 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.508 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.508 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.559 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.559 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.559 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.559 2024 : Entering ITUtils::slGetPdInfo deviceId=13
+Thu Oct 24 20:30:12.559 2024 : Entering ITUtils::getPdInfo for devid=13
+Thu Oct 24 20:30:12.559 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.570 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.570 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.570 2024 : ITUtils::slGetPdInfo  pdfwstate=13 scsiDevType =0
+Thu Oct 24 20:30:12.570 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.570 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.570 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.621 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.621 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.621 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.621 2024 : Entering ITUtils::slGetPdInfo deviceId=14
+Thu Oct 24 20:30:12.621 2024 : Entering ITUtils::getPdInfo for devid=14
+Thu Oct 24 20:30:12.621 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.623 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.623 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.623 2024 : ITUtils::slGetPdInfo  pdfwstate=14 scsiDevType =0
+Thu Oct 24 20:30:12.623 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.623 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.623 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.674 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.674 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.674 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.674 2024 : Entering ITUtils::slGetPdInfo deviceId=15
+Thu Oct 24 20:30:12.674 2024 : Entering ITUtils::getPdInfo for devid=15
+Thu Oct 24 20:30:12.674 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.680 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.680 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.680 2024 : ITUtils::slGetPdInfo  pdfwstate=15 scsiDevType =0
+Thu Oct 24 20:30:12.680 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.680 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.680 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.731 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.731 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.731 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.731 2024 : Entering ITUtils::slGetPdInfo deviceId=16
+Thu Oct 24 20:30:12.731 2024 : Entering ITUtils::getPdInfo for devid=16
+Thu Oct 24 20:30:12.731 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.738 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.738 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.738 2024 : ITUtils::slGetPdInfo  pdfwstate=16 scsiDevType =0
+Thu Oct 24 20:30:12.738 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.738 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.738 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.788 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.788 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.788 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.788 2024 : Entering ITUtils::slGetPdInfo deviceId=17
+Thu Oct 24 20:30:12.788 2024 : Entering ITUtils::getPdInfo for devid=17
+Thu Oct 24 20:30:12.788 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.793 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.793 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.793 2024 : ITUtils::slGetPdInfo  pdfwstate=17 scsiDevType =0
+Thu Oct 24 20:30:12.793 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.793 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.793 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.844 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.844 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.844 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.844 2024 : Entering ITUtils::slGetPdInfo deviceId=18
+Thu Oct 24 20:30:12.844 2024 : Entering ITUtils::getPdInfo for devid=18
+Thu Oct 24 20:30:12.844 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.846 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.846 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.846 2024 : ITUtils::slGetPdInfo  pdfwstate=18 scsiDevType =0
+Thu Oct 24 20:30:12.846 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.846 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.846 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.897 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.897 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.897 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.897 2024 : Entering ITUtils::slGetPdInfo deviceId=19
+Thu Oct 24 20:30:12.897 2024 : Entering ITUtils::getPdInfo for devid=19
+Thu Oct 24 20:30:12.897 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.903 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.903 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.903 2024 : ITUtils::slGetPdInfo  pdfwstate=19 scsiDevType =0
+Thu Oct 24 20:30:12.903 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.903 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.903 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.954 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.954 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.954 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:12.954 2024 : Entering ITUtils::slGetPdInfo deviceId=20
+Thu Oct 24 20:30:12.954 2024 : Entering ITUtils::getPdInfo for devid=20
+Thu Oct 24 20:30:12.954 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:12.956 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:12.956 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:12.956 2024 : ITUtils::slGetPdInfo  pdfwstate=20 scsiDevType =0
+Thu Oct 24 20:30:12.956 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:12.956 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:12.956 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.007 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.007 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.007 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.007 2024 : Entering ITUtils::slGetPdInfo deviceId=21
+Thu Oct 24 20:30:13.007 2024 : Entering ITUtils::getPdInfo for devid=21
+Thu Oct 24 20:30:13.007 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.009 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.009 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.009 2024 : ITUtils::slGetPdInfo  pdfwstate=21 scsiDevType =0
+Thu Oct 24 20:30:13.009 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.009 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.009 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.060 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.060 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.060 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.060 2024 : Entering ITUtils::slGetPdInfo deviceId=22
+Thu Oct 24 20:30:13.060 2024 : Entering ITUtils::getPdInfo for devid=22
+Thu Oct 24 20:30:13.060 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.063 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.063 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.063 2024 : ITUtils::slGetPdInfo  pdfwstate=22 scsiDevType =0
+Thu Oct 24 20:30:13.063 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.063 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.063 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.114 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.114 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.114 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.114 2024 : Entering ITUtils::slGetPdInfo deviceId=23
+Thu Oct 24 20:30:13.114 2024 : Entering ITUtils::getPdInfo for devid=23
+Thu Oct 24 20:30:13.114 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.123 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.123 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.123 2024 : ITUtils::slGetPdInfo  pdfwstate=23 scsiDevType =0
+Thu Oct 24 20:30:13.123 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.123 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.123 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.174 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.174 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.174 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.174 2024 : Entering ITUtils::slGetPdInfo deviceId=24
+Thu Oct 24 20:30:13.174 2024 : Entering ITUtils::getPdInfo for devid=24
+Thu Oct 24 20:30:13.174 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.176 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.176 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.176 2024 : ITUtils::slGetPdInfo  pdfwstate=24 scsiDevType =0
+Thu Oct 24 20:30:13.176 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.176 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.176 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.227 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.227 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.227 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.227 2024 : Entering ITUtils::slGetPdInfo deviceId=25
+Thu Oct 24 20:30:13.227 2024 : Entering ITUtils::getPdInfo for devid=25
+Thu Oct 24 20:30:13.227 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.229 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.229 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.229 2024 : ITUtils::slGetPdInfo  pdfwstate=25 scsiDevType =0
+Thu Oct 24 20:30:13.230 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.230 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.230 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.280 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.280 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.280 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.280 2024 : Entering ITUtils::slGetPdInfo deviceId=26
+Thu Oct 24 20:30:13.280 2024 : Entering ITUtils::getPdInfo for devid=26
+Thu Oct 24 20:30:13.280 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.286 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.286 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.286 2024 : ITUtils::slGetPdInfo  pdfwstate=26 scsiDevType =0
+Thu Oct 24 20:30:13.286 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.286 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.286 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.337 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.337 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.337 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.337 2024 : Entering ITUtils::slGetPdInfo deviceId=27
+Thu Oct 24 20:30:13.337 2024 : Entering ITUtils::getPdInfo for devid=27
+Thu Oct 24 20:30:13.337 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.339 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.339 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.339 2024 : ITUtils::slGetPdInfo  pdfwstate=27 scsiDevType =0
+Thu Oct 24 20:30:13.339 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.339 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.339 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.390 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.390 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.390 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.390 2024 : Entering ITUtils::slGetPdInfo deviceId=28
+Thu Oct 24 20:30:13.390 2024 : Entering ITUtils::getPdInfo for devid=28
+Thu Oct 24 20:30:13.390 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.393 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.393 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.393 2024 : ITUtils::slGetPdInfo  pdfwstate=28 scsiDevType =0
+Thu Oct 24 20:30:13.393 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+
+Thu Oct 24 20:30:13.393 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.393 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.444 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.444 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.444 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.444 2024 : Entering ITUtils::slGetPdInfo deviceId=29
+Thu Oct 24 20:30:13.444 2024 : Entering ITUtils::getPdInfo for devid=29
+Thu Oct 24 20:30:13.444 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.446 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.446 2024 : Exiting ITUtils::getPdInfo
+Thu Oct 24 20:30:13.446 2024 : ITUtils::slGetPdInfo  pdfwstate=29 scsiDevType =0
+Thu Oct 24 20:30:13.446 2024 : ITUtils::slGetPdInfo  pdfwstate=64
+Thu Oct 24 20:30:13.446 2024 : Entering ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.446 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.497 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.497 2024 : Exiting ITUtils::getSlCtrlInfo
+Thu Oct 24 20:30:13.497 2024 : Exiting ITUtils::slGetPdInfo
+Thu Oct 24 20:30:13.497 2024 : Exiting ITSwCtPrCp::process
+Thu Oct 24 20:30:13.497 2024 : MWCliRootCp::process processed for subtokenID=12 errorCode=0
+Thu Oct 24 20:30:13.497 2024 : Entering MWCliRootCp::handleOuput retCode=0, DriveFull=0
+Thu Oct 24 20:30:13.498 2024 : StorelibItDp::processLibCommand SL request sent
+Thu Oct 24 20:30:13.500 2024 : StorelibItDp::processLibCommand SL responded with retcode=0
+Thu Oct 24 20:30:13.500 2024 : CtMain::main command completed with retcode=0
+
