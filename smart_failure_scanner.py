@@ -483,10 +483,13 @@ for Dev in Devs:
 
 			Debug("line = " + str(line))
 
+			if re.search("INQUIRY failed", line):
+				printDev(Dev, "failed smartctl inquiry")
+				continue
+
 			# SMART attribute lines all start with numbers (after stripping leading spaces)
 			if not re.search("^[0-9]", line):
 				continue
-
 			# ...but other unwanted lines also start with numbers, so filter them out
 			if re.search("^0x", line):
 				continue
@@ -525,10 +528,10 @@ for Dev in Devs:
 				continue
 
 			if not smart_attributes["value"].isnumeric():
-				printDev(dev, "value is not numeric: ", smart_attributes["value"])
+				printDev(Dev, "value is not numeric: ", smart_attributes["value"])
 
 			if not smart_attributes["thresh"].isnumeric():
-				printDev(dev, "thresh is not numeric: ", smart_attributes["thresh"])
+				printDev(Dev, "thresh is not numeric: ", smart_attributes["thresh"])
 
 			Delta = int(smart_attributes["value"]) - int(smart_attributes["thresh"])
 
