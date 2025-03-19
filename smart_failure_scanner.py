@@ -207,6 +207,9 @@ def findSerial(SD_Device):
 
 def printDev(Dev, Str):
 
+	Debug("printDev::Dev = " + str(Dev))
+	Debug("printDev::Str = " + str(Str))
+
 	Vendor = findVendor(Dev)
 	Model = findModel(Dev)
 	Serial = findSerial(Dev)
@@ -222,7 +225,7 @@ def printDev(Dev, Str):
 		Ridstr = ", Rid " + str(Rid)
 
 	Size = HumanFriendlyBytes(findRawSize(Dev), 1000, 0)
-	Size = re.sub("\.0", "", Size)
+	Size = re.sub("\\.0", "", Size)
 	Size = re.sub(" ", "", Size)
 
 	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + " " + Size + Ridstr + ", serial " + Serial + "] - " + Str)
@@ -401,8 +404,8 @@ Debug("Block devices found: " + str(Devs))
 # all drives in parallel then wait for them to complete to speed up access later
 jobs = []
 for Dev in Devs:
-	Debug("Spawning SysExec 'smartctl -x' process on Dev " + Dev)
-	p = threading.Thread(target = SysExec, args = ("smartctl -x " + Dev, ))
+	Debug("Spawning SysExec 'sudo smartctl -x' process on Dev " + Dev)
+	p = threading.Thread(target = SysExec, args = ("sudo smartctl -x " + Dev, ))
 	jobs.append(p)
 	p.start()
 
@@ -424,7 +427,7 @@ for Dev in Devs:
 
 	# Find out if the drive is SATA or SAS
 	Drive_Transport[Dev] = "SATA"   # By default
-	for line in SysExec("smartctl -x " + Dev).splitlines():
+	for line in SysExec("sudo smartctl -x " + Dev).splitlines():
 
 
 		# Dell firmware is a lying SOB...
@@ -477,7 +480,7 @@ for Dev in Devs:
 	if Drive_Transport[Dev] == "SATA":
 
 		# Pass 1:  SMART attribute values
-		for line in SysExec("smartctl -x " + Dev).splitlines():
+		for line in SysExec("sudo smartctl -x " + Dev).splitlines():
 
 			line = line.strip() # Remove leading spaces
 
@@ -543,7 +546,7 @@ for Dev in Devs:
 
 
 		# Pass 2:  Scan smartctl output for "Self-test execution status:"
-		out_array = enumerate(SysExec("smartctl -x " + Dev).splitlines())
+		out_array = enumerate(SysExec("sudo smartctl -x " + Dev).splitlines())
 		for i, line in out_array:
 			if re.search("Self-test execution status:", line):
 				msg = line.split(")")[1]
@@ -571,7 +574,7 @@ for Dev in Devs:
 		Non_Medium_Errors = 0
 		Smart_Failing_Cmd = 0
 
-		for line in SysExec("smartctl -x " + Dev).splitlines():
+		for line in SysExec("sudo smartctl -x " + Dev).splitlines():
 
 			if re.search("^SMART Health Status:", line):
 				smart_health_status = line.split(":")[1].strip()
