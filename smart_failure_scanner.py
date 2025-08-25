@@ -222,13 +222,13 @@ def printDev(Dev, Str):
 	Ridstr = ""
 	if Dev in rid_dev_map:
 		Rid = rid_dev_map[Dev]
-		Ridstr = ", Rid " + str(Rid)
+		Ridstr = str(Rid)
 
 	Size = HumanFriendlyBytes(findRawSize(Dev), 1000, 0)
 	Size = re.sub("\\.0", "", Size)
 	Size = re.sub(" ", "", Size)
 
-	print(socket.gethostname() + " " + Dev + " [" + Vendor + " " + Model + " " + Size + Ridstr + ", serial " + Serial + "] - " + Str)
+	print('{:20s}|{:4s}|{:15s}|{:7s}|{:2s}|{:22s}|{:4s}|{:30s}' . format(socket.gethostname(), Ridstr, Serial, " ", " ", Vendor + " " + Model, Size, Str))
 
 
 def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
@@ -237,7 +237,9 @@ def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
 		if Serial:
 			Serial = Serial[0:8]
 
-	print(socket.gethostname() + " " + str(Dev) + " [" + str(Vendor) + " " + str(Model) + ", serial " + str(Serial) + "] - " + str(Str))
+	print('{:20s}|{:4s}|{:15s}|{:7s}|{:2s}|{:22s}|{:4s}|{:30s}' . format(socket.gethostname(), " ", Serial, " ", " ", Vendor + " " + Model, " ", Dev + ":" + Str))
+
+#	print(socket.gethostname() + " " + str(Dev) + " [" + str(Vendor) + " " + str(Model) + ", serial " + str(Serial) + "] - " + str(Str))
 
 
 
