@@ -97,6 +97,37 @@ def SysExec(cmd):
         return(Return_Val)
 
 
+def ComputerFriendlyBytes(bytes, scale, units, optional_scale = None):
+
+	"""
+	Convert a size ("72 TB") into actual bytes
+	Base 1000 units = KB, MB, GB, TB, etc.
+	Base 1024 units = KiB, MiB, GiB, TiB, etc.
+	"""
+
+	if optional_scale == None:
+		optional_scale = scale
+
+	AcceptableScales = [ 1000, 1024 ]
+
+	if not scale in AcceptableScales:
+		return "ERROR"
+
+	if bytes == 0:
+		return "0B"
+
+	if optional_scale == 1000:
+		UNITS = [ "B",  "KB",  "MB",  "GB",  "TB",  "PB",  "EB",  "ZB",  "YB" ]
+	if optional_scale == 1024:
+		UNITS = [ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB" ]
+
+	unit_power = UNITS.index(units)
+
+	multiplier = pow(scale, unit_power)
+
+	return (bytes * multiplier)
+
+
 def HumanFriendlyBytes(bytes, scale, decimals):
 
 	"""
@@ -133,18 +164,32 @@ def findRawSize(SD_Device):
 	by /sys/block/DEV/size
 	"""
 
-	secsize = "0"
-	numsec  = "0"
+	if not re.search("^/c", SD_Device):
 
-	tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/size"
-	if os.path.isfile(tfile):
-		numsec = SysExec("cat " + tfile).strip()
+		secsize = "0"
+		numsec  = "0"
 
-	tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/hw_sector_size"
-	if os.path.isfile(tfile):
-		secsize = SysExec("cat " + tfile).strip()
+		tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/size"
+		if os.path.isfile(tfile):
+			numsec = SysExec("cat " + tfile).strip()
 
-	return int(numsec) * int(secsize)
+		tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/queue/hw_sector_size"
+		if os.path.isfile(tfile):
+			secsize = SysExec("cat " + tfile).strip()
+
+		return int(numsec) * int(secsize)
+	
+	if re.search("^/c", SD_Device):
+
+		f = SysExec("storcli64 " + SD_Device + " show all")
+
+		for l in f.splitlines():
+
+			if not re.search("^Raw", l):
+				continue
+
+			size = l.split("=")[1].split("[")[0].strip().split(" ")
+			return ComputerFriendlyBytes(float(size[0]), 1024, size[1], 1000)
 
 
 def map_dev_to_rid():
@@ -237,7 +282,11 @@ def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
 		if Serial:
 			Serial = Serial[0:8]
 
-	print('{:20s}|{:4s}|{:15s}|{:7s}|{:2s}|{:22s}|{:4s}|{:30s}' . format(socket.gethostname(), " ", Serial, " ", " ", Vendor + " " + Model, " ", Dev + ":" + Str))
+	Size = HumanFriendlyBytes(findRawSize(Dev), 1000, 0)
+	Size = re.sub("\\.0", "", Size)
+	Size = re.sub(" ", "", Size)
+
+	print('{:20s}|{:4s}|{:15s}|{:7s}|{:2s}|{:22s}|{:4s}|{:30s}' . format(socket.gethostname(), Dev, Serial, " ", " ", Vendor + " " + Model, Size, Dev + ":" + Str))
 
 #	print(socket.gethostname() + " " + str(Dev) + " [" + str(Vendor) + " " + str(Model) + ", serial " + str(Serial) + "] - " + str(Str))
 

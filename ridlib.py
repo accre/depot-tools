@@ -425,12 +425,20 @@ def Get_IBP_Server_Version():
                 build_date = re.sub("CMake Build Date: ", "", line).strip()
     else:
         string_file = "UNKNOWN"
-        if os.path.exists("/usr/local/bin/ibp_server.exe"):
-            string_file = "/usr/local/bin/ibp_server.exe"
-        if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.0"):
-            string_file = "/usr/lib/x86_64-linux-gnu/libibp.so.0"
-        if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.1"):
-            string_file = "/usr/lib/x86_64-linux-gnu/libibp.so.1"
+        #if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.0"):
+        #    string_file = "/usr/lib/x86_64-linux-gnu/libibp.so.0"
+        #if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so.1"):
+        #    string_file = "/usr/lib/x86_64-linux-gnu/libibp.so.1"
+        #if os.path.exists("/usr/lib64/libibpserver.so.2.0.0_dev"):
+        #    string_file = "/usr/lib64/libibpserver.so.2.0.0_dev"
+        #if os.path.exists("/usr/bin/ibp_server"):
+        #    string_file = "/usr/bin/ibp_server"
+        #if os.path.exists("/usr/local/bin/ibp_server.exe"):
+        #    string_file = "/usr/local/bin/ibp_server.exe"
+        if os.path.exists("/usr/lib64/libibp.so"):
+            string_file = "/usr/lib64/libibp.so"
+        if os.path.exists("/usr/lib/x86_64-linux-gnu/libibp.so"):
+            string_file = "/usr/lib/x86_64-linux-gnu/libibp.so"
         if string_file == "UNKNOWN":
             print("ERROR:  Can't find string_file, dying")
             sys.exit(1)
@@ -974,7 +982,6 @@ def IBP_Server_Start():
 
 def IBP_Server_Stop():
 
-
     # Rewritten to handle an edge case where there are defunct ibp_server processes.  Running
     # SIGKILL on them will just cause an infinite loop.   Instead, only SIGKILL running
     # processes.  This often happens when removing a drive.   This is a (hopefully) temporary
@@ -1041,7 +1048,6 @@ def IBP_Server_Stop():
 #                print("Waiting for " + pid_arr[pid]["name"] + " SIGKILL shutdown to complete...  " + time)
 #                print(pid_status)
 #                sleep(1)
-
 
     print("Completed shutdown.")
 
@@ -2045,12 +2051,10 @@ def RID_Export(Rid, MD_Dir="", Snap=False):
 
         logging.debug("RID_Export:: Snapshot = " + str(Snap))
 
-
         if Snap == False:
             SyncFiles = ["expire", "history", "id", "soft", "rid.settings", "SEQUESTER_STATUS"]
         else:
             SyncFiles = ["snap/expire", "snap/history", "snap/id", "snap/soft"]
-
     else:
         SyncFiles = ["expire.db", "id.db", "manage.db",
                      "read.db", "soft.db", "write.db", "rid.settings"]
