@@ -17,7 +17,7 @@ CACHE_DATA_ARRAY = {}
 CACHE_TIME_ARRAY = {}
 
 # Enable/disable debugging messages
-PRINT_DEBUG = True
+PRINT_DEBUG = False
 
 def Debug(input_txt):
 
@@ -272,8 +272,8 @@ def parse_lsscsi():
         line = ' '.join(line.split())
 
         hctl = line.split()[0]
-        hctl = re.sub("\]", "", hctl)
-        hctl = re.sub("\[", "", hctl)
+        hctl = re.sub("\\]", "", hctl)
+        hctl = re.sub("\\[", "", hctl)
         type = line.split()[1]
         sas_wwn = line.split()[2]
         sd_dev = line.split()[3]
@@ -953,7 +953,7 @@ for sg_dev in map_es_to_sas_wwn:
 
     for key, d in map_bp_slot.items():
 
-        print("FOOBAR! key = " + str(key) + " and d = " + str(d))
+        Debug("FOOBAR! key = " + str(key) + " and d = " + str(d))
 
         actual_sg_dev = d["sg_dev"]
         num_slots = d["num_slots"]
@@ -964,7 +964,7 @@ for sg_dev in map_es_to_sas_wwn:
 
         if sg_dev == actual_sg_dev:
 
-            print("XYZZY map_es_to_sas_wwn = " + str(map_es_to_sas_wwn))
+            Debug("XYZZY map_es_to_sas_wwn = " + str(map_es_to_sas_wwn))
 
             for slot in map_es_to_sas_wwn[sg_dev]:
                 wwn_1 = map_es_to_sas_wwn[sg_dev][slot]["wwn"]
