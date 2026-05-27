@@ -6,725 +6,827 @@ lsslot - Mathew Binkley
 Display a table showing which hard drive is in each slot on a depot.
 """
 
-import re
-import time
-import socket
 import os
-#import os
-#import stat
+import re
+import shlex
+import shutil
+import subprocess
+import time
 
-from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
-from itertools import chain
 
-# Cache info
-CacheDataArray = {}
-CacheTimeArray = {}
+#############################################################################
+# Globals
+#############################################################################
 
-# Array to hold the output for pretty printing
-Output = []
+CACHE_DATA = {}
+CACHE_TIME = {}
+CACHE_EXPIRES = 20
 
-# Enable/disable debugging messages
-Print_Debug = False
+OUTPUT = []
 
-def Debug(text):
+PRINT_DEBUG = False
 
-	"""
-	A wrapper to print debugging info on a single line.
-	"""
-
-	if Print_Debug:
-		print("DEBUG: " + text)
-	return
+#############################################################################
+# Utility Functions
+#############################################################################
 
 
-def SysExec(cmd):
+def debug(text):
 
-        """
-        Run the given command and return the output
-        """
+    if PRINT_DEBUG:
+        print(f"DEBUG: {text}")
 
-        Debug("SysExec()::  Called with: " + str(cmd))
 
-        # Cache the output of the command for 20 seconds
-        Cache_Expires = 20
+def canonicalize_dev(dev):
 
-        # Computed once, used twice
-        Cache_Keys = list(CacheDataArray.keys())
-        if cmd in Cache_Keys:
-                Cache_Age  = time.time() - CacheTimeArray[cmd]
-        else:
-                Cache_Age  = 0
+    """
+    Resolve symlinks/canonical device names safely.
+    """
 
-        Return_Val = "ERROR"
+    try:
 
-        # If we have valid data cached, return it
-        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                Return_Val = CacheDataArray[cmd]
+        real_dev = os.path.realpath(dev)
 
-        # If the cmd is "cat", use fopen/fread/fclose to open it and
-        # cache it as we go
-        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
-                CacheTimeArray[cmd] = time.time()
-                f.close()
-                Return_Val = CacheDataArray[cmd]
+        if real_dev:
+            return real_dev
 
-        # If we don't have cached data, or it's too old, regenerate it
-        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-                CacheTimeArray[cmd] = time.time()
-                Return_Val = CacheDataArray[cmd]
+    except OSError:
+        pass
 
-        if str(type(Return_Val)) == "<class 'bytes'>":
-                Return_Val = Return_Val.decode("utf-8")
+    return dev
 
-        return Return_Val
+
+def is_rotational_drive(dev):
+
+    """
+    Return True if the device is rotational.
+
+    Linux exposes this via:
+        /sys/block/<dev>/queue/rotational
+
+    1 = HDD
+    0 = SSD/NVMe/flash
+    """
+
+    try:
+
+        base = os.path.basename(dev)
+
+        rotational = sysexec(
+            f"cat /sys/block/{base}/queue/rotational"
+        ).strip()
+
+        return rotational == "1"
+
+    except Exception:
+
+        return False
+
+
+def normalize_sas_for_linux(sas_addr):
+
+    """
+    Normalize SES SAS addresses into Linux WWN form.
+
+    SES and Linux often differ by small vendor-specific
+    offsets.
+    """
+
+    try:
+
+        if sas_addr.startswith("5000c"):
+
+            #
+            # Seagate-style:
+            # Linux = SES + 2
+            #
+            return hex(
+                int(sas_addr, 16) + 2
+            ).split("x")[1].lower()
+
+        if sas_addr.startswith("5000039"):
+
+            #
+            # HGST/Hitachi:
+            # Linux = SES - 1
+            #
+            return hex(
+                int(sas_addr, 16) - 1
+            ).split("x")[1].lower()
+
+    except ValueError:
+        pass
+
+    return sas_addr.lower()
+
+
+def sysexec(cmd):
+
+    """
+    Execute a command and return stdout as a string.
+
+    Results are cached for CACHE_EXPIRES seconds.
+    """
+
+    debug(f"sysexec(): {cmd}")
+
+    if cmd in CACHE_DATA:
+        if time.time() - CACHE_TIME[cmd] < CACHE_EXPIRES:
+            return CACHE_DATA[cmd]
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as exc:
+        debug(f"Invalid command: {exc}")
+        return "ERROR"
+
+    if not parts:
+        return "ERROR"
+
+    #
+    # Special-case "cat file"
+    #
+    if len(parts) == 2 and parts[0] == "cat":
+
+        try:
+            with open(parts[1], "r", encoding="utf-8") as fh:
+                output = fh.read()
+
+        except OSError as exc:
+            debug(f"Failed reading file: {exc}")
+            output = "ERROR"
+
+    else:
+
+        try:
+            result = subprocess.run(
+                parts,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            output = result.stdout
+
+        except OSError as exc:
+            debug(f"Command failed: {exc}")
+            output = "ERROR"
+
+    CACHE_DATA[cmd] = output
+    CACHE_TIME[cmd] = time.time()
+
+    return output
 
 
 def which(program):
 
-        """
+    return shutil.which(program)
 
-        Functions similar to the 'which' program in Unix.  Given
-        an executable filename, it will return the whole path to
-        that executable.
 
-        which("ls") should return "/bin/ls"
+def require_binary(binary):
 
-        Will print an error message and terminate the program if
-        it can't locate the executable in the path.
+    if not which(binary):
+        raise RuntimeError(
+            f"Required executable not found: {binary}"
+        )
 
-        """
+#############################################################################
+# Hardware Discovery
+#############################################################################
 
-        def is_exe(fpath):
-                return os.path.exists(fpath) and os.access(fpath, os.X_OK)
 
-        def ext_candidates(fpath):
-                yield fpath
-                for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
-                        yield fpath + ext
+def find_backplanes():
 
-        fpath, fname = os.path.split(program)
+    debug("find_backplanes()")
 
-        if fpath:
-                if is_exe(program):
-                        return program
-        else:
-                for path in os.environ["PATH"].split(os.pathsep):
-                        exe_file = os.path.join(path, program)
-                        for candidate in ext_candidates(exe_file):
-                                if is_exe(candidate):
-                                        return candidate
+    #
+    # Systems without SES enclosures/backplanes
+    #
+    if not which("lsbackplane"):
 
+        debug(
+            "lsbackplane not found; "
+            "no enclosures detected"
+        )
 
-def FindBackplanes():
+        return {}
 
-	"""
-	Use the "lsbackplane" command to return info about backplanes in the server.
-	"""
+    backplanes = {}
 
-	Debug("def FindBackplanes() entry")
+    output = sysexec("lsbackplane")
 
-	Backplanes = {}
+    for line in output.splitlines():
 
-	# Iterate over a list of enclosures
-	output_lsbackplane = SysExec("lsbackplane")
+        if "/dev/" not in line:
+            continue
 
-	for line in output_lsbackplane.splitlines():
+        fields = [x.strip() for x in line.split("|")]
 
-		if not re.search("/dev/", line):
-			continue
+        if len(fields) < 6:
+            debug(f"Malformed lsbackplane line: {line}")
+            continue
 
-		Enc_SG_Dev = line.split("|")[1].strip()
+        enc_sg_dev = fields[1]
 
-		Backplanes[Enc_SG_Dev] = {}
-		Backplanes[Enc_SG_Dev]["NumSlots"] = line.split("|")[2].strip()
-		Backplanes[Enc_SG_Dev]["Bus"] = line.split("|")[3].strip()
-		Backplanes[Enc_SG_Dev]["SASAddr"] = line.split("|")[4].strip()
-		Backplanes[Enc_SG_Dev]["Alias"] = line.split("|")[5].strip()
+        backplanes[enc_sg_dev] = {
+            "NumSlots": fields[2],
+            "Bus": fields[3],
+            "SASAddr": fields[4],
+            "Alias": fields[5],
+        }
 
-		Debug("FindBackplanes()::  Backplane " + Enc_SG_Dev + " NumSlots " + Backplanes[Enc_SG_Dev]["NumSlots"] + " Bus " + Backplanes[Enc_SG_Dev]["Bus"] + " SASAddr " + Backplanes[Enc_SG_Dev]["SASAddr"] + " Alias " + Backplanes[Enc_SG_Dev]["Alias"])
+    return backplanes
 
-	Debug("def FindBackplanes() exit")
 
-	return Backplanes
+def get_sas_controller():
 
+    debug("get_sas_controller()")
 
-def Get_ChassisBackplane():
+    output = sysexec("lspci")
 
-	"""
-	NOTE:  Currently unused
-	Try to guess the backplane model we are dealing with (Chenbro, AIC).  I'm not sure if there's
-	an official way of doing it, so this is just my hacky first stab at it.
+    patterns = [
+        (
+            r"SAS2008 PCI-Express Fusion-MPT SAS-2 \[Falcon\]",
+            "LSI_Falcon",
+        ),
+        (
+            r"MegaRAID SAS 2208 \[Thunderbolt\]",
+            "LSI_Thunderbolt",
+        ),
+        (
+            r"MegaRAID SAS-3 3108 \[Invader\]",
+            "LSI_Invader",
+        ),
+        (
+            r"SAS3408 Fusion-MPT Tri-Mode",
+            "LSI_FusionMPT",
+        ),
+        (
+            r"Broadcom / LSI Fusion-MPT 12GSAS/PCIe Secure SAS38xx",
+            "LSI_Fusion_12Gbs",
+        ),
+    ]
 
-	Right now I'm only returning a list of detected backplane models, but I may want to add more
-	in the future, if only I knew what it was...
-	"""
+    for line in output.splitlines():
 
-	Debug("def Get_ChassisBackplane() entry")
+        for pattern, controller in patterns:
 
-	Backplanes = []
+            if re.search(pattern, line):
+                debug(f"SAS controller detected: {controller}")
+                return controller
 
-	if os.path.isdir("/sys/class/enclosure"):
+    return "Unknown"
 
-		output_backplanes = SysExec("ls -1 /sys/class/enclosure")
+#############################################################################
+# LED State
+#############################################################################
 
-		for bus in output_backplanes.splitlines():
 
-			Vendor = SysExec("cat /sys/class/enclosure/" + bus + "/device/vendor").strip()
-			Model  = SysExec("cat /sys/class/enclosure/" + bus + "/device/model").strip()
+def get_locate_led_state(backplane, slot):
 
-			if Vendor == "LSI" and Model == "VirtualSES":
-				continue
+    output = sysexec(
+        f"sg_ses -I {slot} --get=ident {backplane}"
+    ).strip()
 
-			Debug("Get_ChassisBackplane():: Detected backplane " + Vendor + " " + Model)
+    if output == "1":
+        return "On"
 
-			Backplanes.append(Vendor + " " + Model)
+    if output == "0":
+        return "Off"
 
-		Debug("def Get_ChassisBackplane() entry")
+    return "Unknown"
 
-	return Backplanes
+#############################################################################
+# Mapping Functions
+#############################################################################
 
 
-def Get_SASController():
+def map_sas_to_dev():
 
-	"""
-	Return the SAS controller model in this depot.
-	"""
+    """
+    Return map of Linux WWN/SAS -> /dev node
+    """
 
-	Debug("def Get_SASController() entry")
+    debug("map_sas_to_dev()")
 
-	output_lspci = SysExec("lspci")
+    mapping = {}
 
-	# Determine the card type, and thus the path we need to take...
-	SAS_Controller = "Unknown"
+    output_saslist = sysexec(
+        "ls -alh /dev/disk/by-id"
+    )
 
-	for line in output_lspci.splitlines():
+    for line in output_saslist.splitlines():
 
-		# Falcon is our 1st gen SAS controller
-		if re.search(r"SAS2008 PCI-Express Fusion-MPT SAS-2 \[Falcon\] \(rev 03\)", line):
-			SAS_Controller = "LSI_Falcon"
-			break
+        if not re.search("wwn-", line):
+            continue
 
-		# Thunderbolt is our 2nd gen SAS controller
-		if re.search(r"MegaRAID SAS 2208 \[Thunderbolt\] \(rev 05\)", line):
-			SAS_Controller = "LSI_Thunderbolt"
-			break
+        if re.search("part", line):
+            continue
 
-		# Invader is our 3rd gen SAS controller
-		if re.search(r"MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
-			SAS_Controller = "LSI_Invader"
-			break
+        try:
 
-		# Trimode is our 4th gen SAS controller
-		if re.search(r"SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
-			SAS_Controller = "LSI_FusionMPT"
-			break
+            this_dev = line.split()[-1]
+            this_dev = this_dev.split("/")[-1]
+            this_dev = "/dev/" + this_dev
 
-		# New one
-		if re.search(r"Broadcom / LSI Fusion-MPT 12GSAS/PCIe Secure SAS38xx", line):
-			SAS_Controller = "LSI_Fusion_12Gbs"
-			break
+            this_dev = canonicalize_dev(
+                this_dev
+            )
 
+            this_sas = line.split()[-3]
+            this_sas = this_sas.split("-")[1]
+            this_sas = this_sas.split("x")[1]
 
-	Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
+            this_sas = this_sas.lower()
 
-	if SAS_Controller == "Unknown":
-		Debug("Get_SASController()::  This is an unknown controller type which may not work properly without new code.")
+            debug(
+                f"map_sas_to_dev(): "
+                f"{this_sas} -> {this_dev}"
+            )
 
-	Debug("def Get_SASController() exit")
+            mapping[this_sas] = this_dev
 
-	return SAS_Controller
+        except Exception as exc:
 
+            debug(
+                f"map_sas_to_dev() parse failed: "
+                f"{line} ({exc})"
+            )
 
-def GetLocateLEDState(This_Backplane, This_Slot):
-	"""
-	This function returns the state of the Locate LED on the given backplane/slot
-	"""
+    return mapping
 
-	# I omit the entry/exit debugs as this function is near bulletproof and gets
-	# called several zillion times, which interferes with actual debugging.
 
-#	Debug("deg GetLocateLEDState():: This_Backplane = " + str(This_Backplane) + " and This_Slot = " + str(This_Slot))
+def map_sas_to_rid():
 
-	This_LedState = SysExec("sg_ses -I " + str(This_Slot) + " --get=ident " + This_Backplane).strip()
+    """
+    Return Linux WWN/SAS -> RID mapping.
+    """
 
-	LedState_Descr = "Unknown"
-	if This_LedState == "1":
-		LedState_Descr = "On"
-	if This_LedState == "0":
-		LedState_Descr = "Off"
+    debug("map_sas_to_rid()")
 
-#	Debug("GetLocateLEDState(): Backplane " + Backplane + " Slot " + str(i) + " is set to " + LedState_Descr)
+    mapping = {}
 
-	return LedState_Descr
+    #
+    # Build dev -> RID map
+    #
+    dev_to_rid = {}
 
+    output = sysexec(
+        "ls -alh /dev/disk/by-label"
+    )
 
-def map_Dev_to_RID():
+    for line in output.splitlines():
 
-	"""
-	Return a map of /dev/ entry -> RID
-	"""
+        if "rid-data-" not in line:
+            continue
 
-	Debug("def map_Dev_to_RID() entry")
+        try:
 
-	Map = {}
+            dev = line.split()[-1]
+            dev = "/dev/" + dev.split("/")[-1]
 
-	output_ridlist = SysExec("ls -alh /dev/disk/by-label")
+            #
+            # Strip partition suffix
+            #
+            dev = re.sub(
+                r"[0-9]+$",
+                "",
+                dev,
+            )
 
-	for line in output_ridlist.splitlines():
-		if not re.search("rid-data-", line):
-			continue
+            dev = canonicalize_dev(dev)
 
-		This_Dev = line.split(" ")[-1]
-		This_Dev = This_Dev.split("/")[2]
+            rid = line.split()[-3]
+            rid = rid.split("-")[2]
 
-		if re.search("^sd", This_Dev):
-			This_Dev = re.sub("[0-9]*$", "", This_Dev)
-		This_Dev = "/dev/" + This_Dev
+            dev_to_rid[dev] = rid
 
-		This_Rid = line.split(" ")[-3]
-		This_Rid = This_Rid.split("-")[2]
+            debug(
+                f"RID map: "
+                f"{dev} -> {rid}"
+            )
 
-		Debug("map_Dev_to_Rid()::  Dev " + This_Dev + " = Rid " + This_Rid)
+        except Exception as exc:
 
-		if multipath_active:
-			This_Dev = map_dm_to_mpath[This_Dev.split("/")[2]]
-			This_Dev = "/dev/mapper/" + This_Dev[0]
+            debug(
+                f"RID parse failed: "
+                f"{line} ({exc})"
+            )
 
-		Map[This_Dev] = This_Rid
+    #
+    # Build SAS -> DEV map
+    #
+    sas_to_dev = map_sas_to_dev()
 
-	Debug("def map_Dev_to_RID() exit")
+    #
+    # Direct matches
+    #
+    for sas_addr, dev in sas_to_dev.items():
 
-	return Map
+        if dev in dev_to_rid:
 
-#XYZZY DEBUG Dev_to_RID = {'/dev/dm-17': '5425', '/dev/dm-57': '5426',
+            mapping[sas_addr] = dev_to_rid[dev]
 
+            debug(
+                f"SAS direct map: "
+                f"{sas_addr} -> "
+                f"{dev_to_rid[dev]}"
+            )
 
+            continue
 
-def map_SAS_to_Dev():
-
-	"""
-	Return a map of /dev/ entry -> SAS/GUID/Id/WWN address
-	"""
-
-	Debug("def map_SAS_to_Dev() entry")
-
-	Map = {}
-
-	output_saslist = SysExec("ls -alh /dev/disk/by-id")
-
-	for line in output_saslist.splitlines():
-
-		if not re.search("wwn-", line):
-			continue
-
-		if re.search("part", line):
-			continue
-
-		This_Dev = line.split(" ")[-1]
-		This_Dev = This_Dev.split("/")[2]
-		#This_Dev = re.sub("[0-9]*$", "", This_Dev)
-		This_Dev = "/dev/" + This_Dev
-
-		This_SAS = line.split(" ")[-3]
-		This_SAS = This_SAS.split("-")[1]
-		This_SAS = This_SAS.split("x")[1]
-
-		Debug("map_SAS_to_Dev()::  Dev " + This_Dev + " = SAS " + This_SAS)
-
-		Map[This_SAS] = This_Dev
-
-	Debug("def map_SAS_to_Dev() exit")
-
-	return Map
-
-
-def map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes):
-
-	"""
-	This will return a mapping of Backplane/Slot to SAS address using sg_ses.
-	sg_ses only returns one variable bit (SAS address)
-	"""
-
-	Debug("def map_Backplane_Slot_to_SAS_with_sgses() entry")
-
-	Map = {}
-
-	Debug("map_Backplane_Slot_to_SAS_with_sgses::  AllBackplanes = " + str(AllBackplanes))
-
-	for This_Backplane in AllBackplanes:
-
-		Debug("map_Backplane_Slot_to_SAS_with_sgses::  This_Backplane = " + This_Backplane)
-
-		Map[This_Backplane] = {}
-
-		output_sgses = SysExec("sg_ses -p aes " + This_Backplane)
-
-		val_slot = None
-		val_sas  = None
-
-		for line in output_sgses.splitlines():
-
-			if not re.search("Element index:", line) and not re.search("SAS address", line):
-				continue
-
-			if re.search("attached SAS address", line):
-				continue
-
-			if re.search("Element index:", line):
-				val_slot = line.split(":")[1]
-				val_slot = val_slot.split(" ")[1]
-
-			if re.search("SAS address", line):
-				val_sas = line.split(":")[1]
-				val_sas = re.sub(" ", "", val_sas)
-				val_sas = re.sub("^0x", "", val_sas).lower()
-
-			if val_slot and val_sas:
-
-				Debug("map_Backplane_Slot_to_SAS_with_sgses()::  Backplane " + This_Backplane + " slot " + str(val_slot) + " maps to SAS " + val_sas)
-
-				Map[This_Backplane][val_slot] = val_sas
-				val_slot = None
-				val_sas  = None
-
-	Debug("def map_Backplane_Slot_to_SAS_with_sgses() exit")
-
-	return Map
-
-
-def map_intermediate_SAS_to_WWN_with_MegaCli():
-
-	"""
-	Return a map of SAS to WWN using the LSI MegaCLI utility.  This is necessary for cards
-	using our 2nd generation HBA controller ("LSI_Thunderbolt")
-	"""
-
-	Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() entry")
-
-	Map = {}
-	val_wwn = None
-	val_sas = None
-
-	output_megacli = SysExec("MegaCli64 -PDList -aALL -NoLog")
-
-	for line in output_megacli.splitlines():
-
-		if not re.search("WWN", line) and not re.search("SAS Address", line):
-			continue
-
-		if re.search("WWN", line):
-			val_wwn = line.split(":")[-1].strip().lower()
-
-		elif re.search("SAS Address", line):
-			SAS = line.split(":")[-1]
-			val_sas = SAS.split("x")[-1].strip().lower()
-			# Sometimes there are multiple SAS values.  Ignore ones that are 0
-			if val_sas == "0":
-				val_sas = None
-				continue
-
-		if val_wwn and val_sas:
-
-			# Extra hacky, but necessary.  This is a guess, but the LSI controller appears to use the
-			# drives's WWN if it has one, and autogenerates one if it  doesn't.  The former case appears
-			# to include some of our SAS drives (not SATA drives).  I'm not sure if this is the textbook
-			# solution, but it works in our case.
-			if val_sas.startswith("5000c"):
-				val_wwn = hex(int(val_sas, 16) + 2).split("x")[1].lower()
-
-			Debug("map_intermediate_SAS_to_WWN_with_MegaCli()::  SAS " + str(val_sas) + " maps to WWN " + str(val_wwn))
-			Map[val_sas] = val_wwn
-
-			val_wwn = None
-			val_sas = None
-
-	Debug("def map_intermediate_SAS_to_WWN_with_MegaCli() exit")
-
-	return Map
-
-
-def map_intermediate_SAS_to_WWN_with_sas2ircu():
-
-	"""
-	This will return a mapping the intermediate SAS to WWN addreses using sas2ircu which is
-	necessary for the LSI_Falcon HBA controllers.
-	"""
-
-	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() entry")
-
-	Map = {}
-
-	val_device = None
-	val_sas    = None
-	val_wwn    = None
-
-	output_sas2ircu = SysExec("sas2ircu 0 display")
-
-	for line in output_sas2ircu.splitlines():
-
-		if not re.search("Device is a", line) and \
-		   not re.search("SAS Address", line) and \
-		   not re.search("GUID", line):
-			continue
-
-		if re.search("Device is a", line):
-			val_device = re.sub("Device is a ", "", line)
-		elif re.search("SAS Address", line):
-			val_sas = line.split(":")[1]
-			val_sas = re.sub(" ", "", val_sas)
-			val_sas = re.sub("-", "", val_sas).lower()
-		elif re.search("GUID", line):
-			val_wwn = line.split(":")[1]
-			val_wwn = re.sub(" ", "", val_wwn)
-
-		Debug("map_intermediate_SAS_to_WWN_with_sas2ircu()::  val_device = " + str(val_device) + " val_sas = " + str(val_sas) + " val_wwn = " + str(val_wwn))
-
-		if val_device and val_sas and val_wwn:
-
-			if val_device == "Hard disk":
-
-				Map[val_sas] = val_wwn
-
-			val_device    = None
-			val_sas       = None
-			val_wwn      = None
-
-	Debug("def map_intermediate_SAS_to_WWN_with_sas2ircu() exit")
-
-	return Map
-
-
-def fudge_SAS_to_Dev_map(SAS_to_Dev, SAS_Controller):
-
-	"""
-	This function tries to encapsulate the ideosyncracies of each HBA controller
-	so we can output a consistent SAS_to_Dev Map
-	"""
-
-	Debug("def fudge_SAS_to_Dev_map() entry")
-
-	Remap_SAS_to_Dev = {}
-
-	if SAS_Controller == "LSI_Falcon":
-
-		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_sas2ircu()
-
-		for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
-
-			if This_WWN in SAS_to_Dev:
-				This_Dev = SAS_to_Dev[This_WWN]
-			else:
-				This_Dev = "Empty_Slot"
-
-			Remap_SAS_to_Dev[This_SAS] = This_Dev
-
-
-	if SAS_Controller == "LSI_Thunderbolt":
-
-		Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_MegaCli()
-
-		for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
-
-			if This_WWN in SAS_to_Dev:
-				This_Dev = SAS_to_Dev[This_WWN]
-			else:
-				This_Dev = "Empty_Slot"
-
-			Remap_SAS_to_Dev[This_SAS] = This_Dev
-
-
-	if SAS_Controller == "LSI_Invader" or SAS_Controller == "LSI_FusionMPT" or SAS_Controller == "LSI_Fusion_12Gbs":
-
-		# On cms-depot18 it appears to need intermediate info too... :-|
-		if socket.gethostname() == "cms-depot18.vampire":
-
-			Remap_SAS_to_WWN = map_intermediate_SAS_to_WWN_with_MegaCli()
-
-			for This_SAS, This_WWN in Remap_SAS_to_WWN.items():
-
-				if This_WWN in SAS_to_Dev:
-					This_Dev = SAS_to_Dev[This_WWN]
-				else:
-					This_Dev = "Empty_Slot"
-
-				Remap_SAS_to_Dev[This_SAS] = This_Dev
-
-		else:
-
-			for This_SAS, This_Dev in SAS_to_Dev.items():
-				New_SAS = hex(int(This_SAS, 16) - 2).split("x")[1].lower()
-
-				Remap_SAS_to_Dev[New_SAS] = This_Dev
-
-	Debug("def fudge_SAS_to_Dev_map() exit")
-
-	return Remap_SAS_to_Dev
-
-
-def map_Backplane_Slot_to_Dev(AllBackplanes):
-
-	"""
-	This function returns a map of backplane/slot to /dev/entry
-	"""
-
-	Debug("def map_Backplane_Slot_to_Dev() entry")
-
-	Map = {}
-
-	Backplane_Slot_to_SAS = map_Backplane_Slot_to_SAS_with_sgses(AllBackplanes)
-
-	SAS_to_Dev = fudge_SAS_to_Dev_map(map_SAS_to_Dev(), SAS_Controller)
-
-	for This_Backplane in AllBackplanes:
-
-		Map[This_Backplane] = {}
-
-		NumSlots = int(AllBackplanes[This_Backplane]["NumSlots"])
-
-		Debug("map_Backplane_Slot_to_Dev()::  Working on Backplane " + str(This_Backplane) + " with NumSlots " + str(NumSlots))
-
-		for slot in range(0, NumSlots):
-
-			if This_Backplane not in Backplane_Slot_to_SAS:
-				Debug("map_Backplane_Slot_to_Dev()::  ERROR!  I couldn't find Backplane " + This_Backplane + " listed in Backplane_Slot_to_SAS dict")
-				continue
-
-			if str(slot) not in Backplane_Slot_to_SAS[This_Backplane]:
-				Debug("map_Backplane_Slot_to_Dev()::  ERROR!  I couldn't find slot " + str(slot) + " listed in Backplane_Slot_to_SAS[" + This_Backplane + "] dict")
-				continue
-
-			SAS = Backplane_Slot_to_SAS[This_Backplane][str(slot)]
-			SAS = re.sub("0x","", SAS)
-
-			This_Dev = "Empty_Slot"
-
-			if SAS in SAS_to_Dev:
-				This_Dev = SAS_to_Dev[SAS]
-
-			Debug("map_Backplane_Slot_to_Dev()::  Backplane = " + This_Backplane + " and Slot = " + str(slot) + " and SAS = " + SAS + " and Dev = " + This_Dev)
-
-			Map[This_Backplane][slot] = This_Dev
-
-	Debug("def map_Backplane_Slot_to_Dev() exit")
-
-	return Map
-
-
-def is_multipath_enabled():
-
-        # Quick and dirty, but works for now.   Not a general-purpose boolean,
-        # but optimized for our current environment
         #
-        # First, if SAS_Controller isn't "LSI_Fusion_12Gbs", then it won't be
-        #  running multipathing
-        if SAS_Controller != "LSI_Fusion_12Gbs":
-                return(False)
+        # Multipath fallback:
+        # compare WWIDs
+        #
+        try:
 
-        # Verify if the multipath binary exists in the PATH.  If not, then
-        # it's not running multipath
-        if not which("multipath"):
-                return(False)
+            base = os.path.basename(dev)
 
-        multipath_ll = SysExec("multipath -ll")
-        if re.search("DM multipath kernel driver not loaded", multipath_ll):
-                return(False)
+            dev_wwid = sysexec(
+                f"cat /sys/block/{base}/device/wwid"
+            ).strip()
 
-        # Now query multipath and see if it's actually running in multipath
-        # mode or not
-        num_lines = sum(1 for line in multipath_ll.splitlines())
+            if (
+                not dev_wwid
+                or dev_wwid == "ERROR"
+            ):
+                continue
 
-        if num_lines == 0:
-                return(False)
-        else:
-                return(True)
+            for candidate_dev, candidate_rid in (
+                dev_to_rid.items()
+            ):
+
+                candidate_base = os.path.basename(
+                    candidate_dev
+                )
+
+                candidate_wwid = sysexec(
+                    f"cat /sys/block/{candidate_base}/device/wwid"
+                ).strip()
+
+                if (
+                    not candidate_wwid
+                    or candidate_wwid == "ERROR"
+                ):
+                    continue
+
+                if dev_wwid == candidate_wwid:
+
+                    mapping[sas_addr] = candidate_rid
+
+                    debug(
+                        f"SAS multipath map: "
+                        f"{sas_addr} -> "
+                        f"{candidate_rid} "
+                        f"({dev} == "
+                        f"{candidate_dev})"
+                    )
+
+                    break
+
+        except Exception as exc:
+
+            debug(
+                f"Multipath compare failed: "
+                f"{dev} ({exc})"
+            )
+
+    return mapping
 
 
-def map_dm_to_mpath():
+def map_backplane_slot_to_sas(backplanes):
 
-        # Build a dm_dev -> mpath_dev map so I can remap in lsslot on multipath devices
+    """
+    Return Backplane/Slot -> SES SAS map
+    """
 
-        map = {}
+    debug("map_backplane_slot_to_sas()")
 
-        for line in SysExec("ls -alh /dev/disk/by-id").splitlines():
+    mapping = {}
 
-                if not re.search("mpath", line):
-                        continue
+    for this_backplane in backplanes:
 
-                if re.search("uuid", line):
-                        continue
+        mapping[this_backplane] = {}
 
-                dm_dev = line.split()[-1].split("/")[2]
-                mpath_dev = line.split()[-3]
-                mpath_dev = re.sub("dm-name-", "", mpath_dev)
-                mpath_dev = re.sub("-part[12]", "", mpath_dev)
+        output_sgses = sysexec(
+            f"sg_ses -p aes {this_backplane}"
+        )
 
-                if not dm_dev in map:
+        val_slot = None
+        val_sas = None
 
-                        map[dm_dev] = []
-                        map[dm_dev].append(mpath_dev)
+        for line in output_sgses.splitlines():
 
-        return(map)
+            if (
+                not re.search(
+                    "Element index:",
+                    line
+                )
+                and not re.search(
+                    "SAS address",
+                    line
+                )
+            ):
+                continue
 
+            if re.search(
+                "attached SAS address",
+                line
+            ):
+                continue
+
+            if re.search(
+                "Element index:",
+                line
+            ):
+
+                val_slot = line.split(":")[1]
+                val_slot = val_slot.split(" ")[1]
+
+            if re.search(
+                "SAS address",
+                line
+            ):
+
+                val_sas = line.split(":")[1]
+                val_sas = re.sub(
+                    " ",
+                    "",
+                    val_sas,
+                )
+
+                val_sas = re.sub(
+                    "^0x",
+                    "",
+                    val_sas,
+                ).lower()
+
+            if val_slot and val_sas:
+
+                debug(
+                    f"{this_backplane} "
+                    f"slot {val_slot} "
+                    f"-> {val_sas}"
+                )
+
+                mapping[
+                    this_backplane
+                ][val_slot] = val_sas
+
+                val_slot = None
+                val_sas = None
+
+    return mapping
+
+
+def map_backplane_slot_to_dev(
+    all_backplanes,
+):
+
+    """
+    Return:
+        backplane/slot -> dev
+        backplane/slot -> sas
+    """
+
+    debug("map_backplane_slot_to_dev()")
+
+    mapping = {}
+
+    backplane_slot_to_sas = (
+        map_backplane_slot_to_sas(all_backplanes)
+    )
+
+    #
+    # Linux WWN -> device
+    #
+    linux_sas_to_dev = map_sas_to_dev()
+
+    for backplane in all_backplanes:
+
+        mapping[backplane] = {}
+
+        all_slots = sorted(
+            int(x)
+            for x in (
+                backplane_slot_to_sas
+                .get(backplane, {})
+                .keys()
+            )
+        )
+
+        for slot in all_slots:
+
+            dev = "Empty_Slot"
+
+            ses_sas = (
+                backplane_slot_to_sas
+                .get(backplane, {})
+                .get(str(slot))
+            )
+
+            if (
+                ses_sas
+                and ses_sas != "0"
+            ):
+
+                #
+                # Normalize SES SAS into Linux WWN form
+                #
+                linux_sas = normalize_sas_for_linux(
+                    ses_sas
+                )
+
+                if linux_sas in linux_sas_to_dev:
+
+                    dev = linux_sas_to_dev[
+                        linux_sas
+                    ]
+
+            mapping[backplane][slot] = dev
+
+    return mapping, backplane_slot_to_sas
 
 #############################################################################
-# Main Loop
+# Main
 #############################################################################
 
-### Fetch the list of SAS Contollers
-SAS_Controller = Get_SASController()
 
-### See if multipathing is enable to determine which code path to take
-### Note that this test depends on the SAS_Controller variable above
-multipath_active = is_multipath_enabled()
+def main():
 
-if multipath_active:
-	map_dm_to_mpath = map_dm_to_mpath()
+    get_sas_controller()
 
-Backplane_List = FindBackplanes()
+    backplane_list = find_backplanes()
 
-Backplane_Slot_to_Dev = map_Backplane_Slot_to_Dev(Backplane_List)
+    if not backplane_list:
+        print("No enclosures detected.")
+        return
 
-Dev_to_RID = map_Dev_to_RID()
+    (
+        backplane_slot_to_dev,
+        backplane_slot_to_sas,
+    ) = map_backplane_slot_to_dev(
+        backplane_list,
+    )
 
-for Backplane in Backplane_List:
+    sas_to_rid = map_sas_to_rid()
 
-	Backplane_Alias = Backplane_List[Backplane]["Alias"]
+    linux_sas_to_dev = map_sas_to_dev()
 
-	for i in range(0, int(Backplane_List[Backplane]["NumSlots"])):
+    mapped_devices = set()
 
-		if Backplane not in Backplane_Slot_to_Dev:
-			Debug("MAIN LOOP::  Error!  No Backplane " + Backplane + " in Backplane_Slot_to_Dev dict")
-			continue
+    #
+    # Normal SES-visible slots
+    #
+    for backplane in backplane_list:
 
-		if i not in Backplane_Slot_to_Dev[Backplane]:
-			Debug("MAIN LOOP::  Error!  No Slot " + str(i) + " in Backplane_Slot_to_Dev[" + Backplane + "] dict")
-			continue
+        alias = backplane_list[backplane]["Alias"]
 
-		Dev = Backplane_Slot_to_Dev[Backplane][i]
+        all_slots = sorted(
+            int(x)
+            for x in (
+                backplane_slot_to_sas
+                .get(backplane, {})
+                .keys()
+            )
+        )
 
-		if multipath_active:
-			Dev = map_dm_to_mpath[Dev.split("/")[2]]
-			Dev = "/dev/mapper/" + Dev[0]
+        for slot in all_slots:
 
-		Rid = "Empty"
-		if Dev in Dev_to_RID:
-			Rid = Dev_to_RID[Dev]
+            dev = (
+                backplane_slot_to_dev
+                .get(backplane, {})
+                .get(slot, "Empty_Slot")
+            )
 
-		LedState = GetLocateLEDState(Backplane, i)
+            sas = (
+                backplane_slot_to_sas
+                .get(backplane, {})
+                .get(str(slot))
+            )
 
-		Output.append([Backplane_Alias, str(i), LedState, Dev, Rid])
+            rid = "Empty"
 
-output_as_tuples = [ tuple(item) for item in Output ]
-Output = list(set(output_as_tuples))
-Output.sort()
+            if (
+                sas
+                and sas != "0"
+            ):
 
-x = PrettyTable(["Backplane", "Slot", "Locate LED", "Dev", "RID"])
-x.padding_width = 1
-x.align = "l"
-for row in Output:
-	x.add_row(row)
-print(x)
+                normalized_sas = (
+                    normalize_sas_for_linux(
+                        sas
+                    )
+                )
+
+                if normalized_sas in sas_to_rid:
+
+                    rid = sas_to_rid[
+                        normalized_sas
+                    ]
+
+            #
+            # Skip phantom SES elements
+            #
+            if (
+                sas != "0"
+                and dev == "Empty_Slot"
+                and rid == "Empty"
+            ):
+                continue
+
+            #
+            # Track mapped devices
+            #
+            if dev != "Empty_Slot":
+                mapped_devices.add(dev)
+
+            #
+            # Skip LED queries on empty bays
+            #
+            if sas == "0":
+
+                led_state = "-"
+
+            else:
+
+                led_state = get_locate_led_state(
+                    backplane,
+                    slot,
+                )
+
+            OUTPUT.append([
+                alias,
+                str(slot),
+                led_state,
+                dev,
+                rid,
+            ])
+
+    #
+    # Add rotational Linux drives
+    # not visible in SES
+    #
+    for sas_addr, dev in sorted(
+        linux_sas_to_dev.items()
+    ):
+
+        #
+        # Already mapped into enclosure
+        #
+        if dev in mapped_devices:
+            continue
+
+        #
+        # Ignore SSD/NVMe/flash devices
+        #
+        if not is_rotational_drive(dev):
+
+            debug(
+                f"Skipping non-rotational "
+                f"unmapped drive: {dev}"
+            )
+
+            continue
+
+        rid = sas_to_rid.get(
+            sas_addr,
+            "Empty",
+        )
+
+        OUTPUT.append([
+            "Unmapped",
+            "?",
+            "?",
+            dev,
+            rid,
+        ])
+
+
+    #
+    # Remove duplicates and sort
+    #
+    output_unique = sorted(
+        set(tuple(x) for x in OUTPUT)
+    )
+
+    table = PrettyTable([
+        "Backplane",
+        "Slot",
+        "Locate LED",
+        "Dev",
+        "RID",
+    ])
+
+    table.padding_width = 1
+    table.align = "l"
+
+    for row in output_unique:
+        table.add_row(row)
+
+    print(table)
+
+
+if __name__ == "__main__":
+    main()
