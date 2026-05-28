@@ -13,6 +13,7 @@ import os
 #import os
 #import stat
 
+import shlex
 from subprocess import Popen, PIPE, STDOUT
 from prettytable import PrettyTable
 
@@ -40,42 +41,59 @@ def Debug(text):
 def SysExec(cmd):
 
         """
-        Run the given command and return the output
+        Run the given command and return the output.
+
+        Caches results for 20 seconds.  Supports a special case: when the
+        command begins with "cat <file>" the file contents are read directly
+        with open() and cached just like a subprocess result.
+
+        Returns a string.  On failure the error is logged (if debugging is
+        enabled) and the string "ERROR" is returned so callers do not crash.
         """
+
+        Debug("SysExec()::  Called with: " + str(cmd))
 
         # Cache the output of the command for 20 seconds
         Cache_Expires = 20
 
-        # Computed once, used twice
-        Cache_Keys = list(CacheDataArray.keys())
-        if cmd in Cache_Keys:
-                Cache_Age  = time.time() - CacheTimeArray[cmd]
+        # O(1) cache lookup using dict membership test directly
+        if cmd in CacheDataArray:
+                if time.time() - CacheTimeArray[cmd] < Cache_Expires:
+                        return CacheDataArray[cmd]
+
+        Return_Val = None
+
+        # Special case: "cat <path>" is read directly from the filesystem
+        try:
+                parts = shlex.split(cmd)
+        except ValueError as exc:
+                Debug("SysExec()::  Invalid command: " + str(exc))
+                return "ERROR"
+
+        if len(parts) == 2 and parts[0] == "cat":
+                try:
+                        with open(parts[1], "r") as fh:
+                                Return_Val = fh.read()
+                except OSError as exc:
+                        Debug("SysExec()::  Failed to read file: " + str(exc))
+                        Return_Val = "ERROR"
         else:
-                Cache_Age  = 0
+                try:
+                    result = Popen(
+                        parts, stdout=PIPE, stderr=STDOUT
+                    ).communicate()[0]
+                except OSError as exc:
+                        Debug("SysExec()::  Command failed: " + str(exc))
+                        Return_Val = "ERROR"
+                else:
+                        Return_Val = result
 
-        Return_Val = "ERROR"
-
-        # If we have valid data cached, return it
-        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                Return_Val = CacheDataArray[cmd]
-
-        # If the cmd is "cat", use fopen/fread/fclose to open it and
-        # cache it as we go
-        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
+        # Cache and decode
+        if Return_Val is not None:
+                CacheDataArray[cmd] = Return_Val
                 CacheTimeArray[cmd] = time.time()
-                f.close()
-                Return_Val = CacheDataArray[cmd]
-
-        # If we don't have cached data, or it's too old, regenerate it
-        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-                CacheTimeArray[cmd] = time.time()
-                Return_Val = CacheDataArray[cmd]
-
-        if str(type(Return_Val)) == "<class 'bytes'>":
-                Return_Val = Return_Val.decode("utf-8")
+                if isinstance(Return_Val, bytes):
+                        Return_Val = Return_Val.decode("utf-8")
 
         return Return_Val
 
