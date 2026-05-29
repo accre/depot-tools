@@ -15,11 +15,11 @@ import sys
 import time
 
 from subprocess import Popen, PIPE, STDOUT
+from shutil import which
 from prettytable import PrettyTable
 
 # Cache info
-CACHE_DATA_ARRAY = {}
-CACHE_TIME_ARRAY = {}
+_CACHE = {}
 
 PRINT_DEBUG = False
 
@@ -36,95 +36,22 @@ def Debug(input_txt):
 
 
 def SysExec(cmd):
-
-    Cache_Expires = 20
-
-    Cache_Keys = list(CACHE_DATA_ARRAY.keys())
-
-    if cmd in Cache_Keys:
-        Cache_Age = time.time() - CACHE_TIME_ARRAY[cmd]
-    else:
-        Cache_Age = 0
-
-    return_val = "ERROR"
-
-    if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-
-        return_val = CACHE_DATA_ARRAY[cmd]
-
-    elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-
-        f = open(cmd.split()[1], "r")
-        CACHE_DATA_ARRAY[cmd] = f.read()
-        CACHE_TIME_ARRAY[cmd] = time.time()
-        f.close()
-
-        return_val = CACHE_DATA_ARRAY[cmd]
-
-    elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-
-        CACHE_DATA_ARRAY[cmd] = Popen(
-            cmd.split(),
-            stdout=PIPE,
-            stderr=STDOUT
-        ).communicate()[0]
-
-        CACHE_TIME_ARRAY[cmd] = time.time()
-
-        return_val = CACHE_DATA_ARRAY[cmd]
-
-    if isinstance(return_val, bytes):
-        return_val = return_val.decode("utf-8")
-
-    return return_val
-
-
-def which(program):
-
-    def is_exe(fpath):
-        return os.path.exists(fpath) and os.access(fpath, os.X_OK)
-
-    def ext_candidates(fpath):
-        yield fpath
-        for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
-            yield fpath + ext
-
-    fpath, fname = os.path.split(program)
-
-    if fpath:
-
-        if is_exe(program):
-            return program
-
-    else:
-
-        for path in os.environ["PATH"].split(os.pathsep):
-
-            exe_file = os.path.join(path, program)
-
-            for candidate in ext_candidates(exe_file):
-
-                if is_exe(candidate):
-                    return candidate
+    CACHE_TTL = 20
+    now = time.time()
+    if cmd in _CACHE and now - _CACHE[cmd][0] < CACHE_TTL:
+        return _CACHE[cmd][1]
+    result = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+    if isinstance(result, bytes):
+        result = result.decode("utf-8")
+    _CACHE[cmd] = (now, result)
+    return result
 
 
 def Bin_Requires(bin):
-
-    if os.path.isfile("/sbin/" + bin):
-        return "/sbin/" + bin
-
-    elif os.path.isfile("/usr/sbin/" + bin):
-        return "/usr/sbin/" + bin
-
-    elif os.path.isfile("/usr/local/sbin/" + bin):
-        return "/usr/local/sbin/" + bin
-
     bin_path = which(bin)
-
     if not bin_path:
         print("ERROR: Could not locate " + bin + " in the PATH")
-        sys.exit()
-
+        sys.exit(1)
     return bin_path
 
 
@@ -190,14 +117,12 @@ def parse_lsscsi():
 
         line = " ".join(line.split())
 
-        hctl = line.split()[0]
-        hctl = re.sub("\\]", "", hctl)
-        hctl = re.sub("\\[", "", hctl)
-
-        type_ = line.split()[1]
-        sas_wwn = line.split()[2]
-        sd_dev = line.split()[3]
-        sg_dev = line.split()[4]
+        fields = line.split()
+        hctl = fields[0].strip("[]")
+        type_ = fields[1]
+        sas_wwn = fields[2]
+        sd_dev = fields[3]
+        sg_dev = fields[4]
 
         if sd_dev == "-":
             sd_dev = "/dev/null" + str(c)
@@ -260,17 +185,11 @@ def aggregate_physical_disks(map_lsblk):
 
     for sd_dev, d in map_lsblk.items():
 
-        wwn = d.get("WWN", "")
-
-        if not wwn:
-            wwn = sd_dev
+        wwn = d.get("WWN", "") or sd_dev
 
         if wwn not in physical:
 
-            physical[wwn] = dict(d)
-
-            physical[wwn]["DEVICES"] = [sd_dev]
-            physical[wwn]["SG_DEVICES"] = []
+            physical[wwn] = {**d, "DEVICES": [sd_dev], "SG_DEVICES": []}
 
             if "sg_dev" in d:
                 physical[wwn]["SG_DEVICES"].append(d["sg_dev"])
@@ -285,14 +204,9 @@ def aggregate_physical_disks(map_lsblk):
             #
             # Prefer entries with enclosure data
             #
-            if "slot" in d:
-                physical[wwn]["slot"] = d["slot"]
-
-            if "backplane" in d:
-                physical[wwn]["backplane"] = d["backplane"]
-
-            if "bp_alias" in d:
-                physical[wwn]["bp_alias"] = d["bp_alias"]
+            for key in ("slot", "backplane", "bp_alias"):
+                if key in d:
+                    physical[wwn][key] = d[key]
 
     return physical
 
@@ -311,6 +225,7 @@ def map_enclosures():
     #
     # Deduplicate enclosures by SAS WWN
     #
+
 
     for sd_dev, d in raw.items():
 
@@ -388,10 +303,7 @@ def map_enclosure_slots(enclosures):
 
             if re.search("Element index:", line):
 
-                slot = " ".join(line.split())
-                slot = slot.split(":")[1]
-                slot = " ".join(slot.split())
-                slot = slot.split()[0]
+                slot = line.split(":")[1].split()[0]
 
             if re.search("SAS address", line):
 
@@ -435,6 +347,9 @@ def HumanFriendlyModel(Vendor, Model):
 def HumanFriendlySerial(Serial, Vendor, Model):
 
     Serial = Serial.strip()
+
+    if Vendor == "SEAGATE":
+        Serial = Serial[:8]
 
     if not Serial:
         return "NO_SERIAL"
@@ -550,12 +465,7 @@ for wwn, d in physical_disks.items():
 
     rota = str(d["ROTA"])
 
-    if rota == "1":
-        rota_txt = "hd"
-    elif rota == "0":
-        rota_txt = "ssd"
-    else:
-        rota_txt = "unknown"
+    rota_txt = {"1": "hd", "0": "ssd"}.get(rota, "unknown")
 
     media = "disk:" + rota_txt
 
@@ -588,7 +498,6 @@ x = PrettyTable([
 x.padding_width = 1
 x.align = "l"
 
-for row in output:
-    x.add_row(row)
+x.add_rows(output)
 
 print(x)
