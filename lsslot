@@ -73,9 +73,7 @@ def is_rotational_drive(dev):
 
         base = os.path.basename(dev)
 
-        rotational = sysexec(
-            f"cat /sys/block/{base}/queue/rotational"
-        ).strip()
+        rotational = sysexec(f"cat /sys/block/{base}/queue/rotational").strip()
 
         return rotational == "1"
 
@@ -200,17 +198,7 @@ def find_backplanes():
 
     debug("find_backplanes()")
 
-    #
-    # Systems without SES enclosures/backplanes
-    #
-    if not which("lsbackplane"):
-
-        debug(
-            "lsbackplane not found; "
-            "no enclosures detected"
-        )
-
-        return {}
+    require_binary("lsbackplane")
 
     backplanes = {}
 
@@ -278,6 +266,193 @@ def get_sas_controller():
 
     return "Unknown"
 
+def map_dev_to_rid():
+
+    mapping = {}
+
+    output = sysexec("ls -alh /dev/disk/by-label")
+
+    for line in output.splitlines():
+
+        if "rid-data-" not in line:
+            continue
+
+        try:
+
+            dev = line.split()[-1]
+            dev = "/dev/" + dev.split("/")[-1]
+
+            dev = re.sub(
+                r"[0-9]+$",
+                "",
+                dev,
+            )
+
+            dev = canonicalize_dev(dev)
+
+            rid = line.split()[-3]
+            rid = rid.split("-")[2]
+
+            mapping[dev] = rid
+
+        except Exception:
+            pass
+
+    return mapping
+
+def map_enclosure_slot_to_dev():
+    """
+    Build a mapping from Linux enclosure slots to block devices.
+
+    Returns:
+
+        {
+            enclosure_name: {
+                slot_number: "/dev/sdX"
+            }
+        }
+
+    Works for both SAS and SATA drives.
+    """
+
+    debug("map_enclosure_slot_to_dev()")
+
+    mapping = {}
+
+    enclosure_root = "/sys/class/enclosure"
+
+    if not os.path.isdir(enclosure_root):
+        return mapping
+
+    for enclosure in os.listdir(enclosure_root):
+
+        enclosure_path = os.path.join(
+            enclosure_root,
+            enclosure,
+        )
+
+        mapping[enclosure] = {}
+
+        try:
+            slot_entries = os.listdir(
+                enclosure_path
+            )
+
+        except OSError:
+            continue
+
+        for slot_name in slot_entries:
+
+            slot_path = os.path.join(
+                enclosure_path,
+                slot_name,
+            )
+
+            if not os.path.isdir(slot_path):
+                continue
+
+            #
+            # Most kernels expose:
+            #
+            # SLOT 00/device/block/sdb
+            #
+            block_dir = os.path.join(
+                slot_path,
+                "device",
+                "block",
+            )
+
+            if not os.path.isdir(block_dir):
+                continue
+
+            try:
+
+                devices = os.listdir(
+                    block_dir
+                )
+
+            except OSError:
+                continue
+
+            if not devices:
+                continue
+
+            dev = "/dev/" + devices[0]
+
+            #
+            # Extract slot number
+            #
+            slot_match = re.search(
+                r"(\d+)",
+                slot_name,
+            )
+
+            if not slot_match:
+                continue
+
+            slot_num = int(
+                slot_match.group(1)
+            )
+
+            mapping[enclosure][slot_num] = dev
+
+            debug(
+                f"Enclosure map: "
+                f"{enclosure} "
+                f"slot {slot_num} "
+                f"-> {dev}"
+            )
+
+    return mapping
+
+def map_sg_to_enclosure():
+
+    mapping = {}
+
+    enclosure_root = "/sys/class/enclosure"
+
+    if not os.path.isdir(enclosure_root):
+        return mapping
+
+    for enclosure in os.listdir(enclosure_root):
+
+        enclosure_link = os.path.realpath(
+            os.path.join(
+                enclosure_root,
+                enclosure,
+            )
+        )
+
+        #
+        # Strip trailing /enclosure/<name>
+        #
+        enclosure_parent = os.path.dirname(
+            os.path.dirname(
+                enclosure_link
+            )
+        )
+
+        for sg in os.listdir(
+            "/sys/class/scsi_generic"
+        ):
+
+            sg_path = os.path.realpath(
+                f"/sys/class/scsi_generic/{sg}/device"
+            )
+
+            if sg_path == enclosure_parent:
+
+                mapping[f"/dev/{sg}"] = enclosure
+
+                debug(
+                    f"SG map: "
+                    f"/dev/{sg} -> {enclosure}"
+                )
+
+    debug(f"SG map: {mapping}")
+
+    return mapping
+
 #############################################################################
 # LED State
 #############################################################################
@@ -285,9 +460,7 @@ def get_sas_controller():
 
 def get_locate_led_state(backplane, slot):
 
-    output = sysexec(
-        f"sg_ses -I {slot} --get=ident {backplane}"
-    ).strip()
+    output = sysexec(f"sg_ses -I {slot} --get=ident {backplane}").strip()
 
     if output == "1":
         return "On"
@@ -312,9 +485,7 @@ def map_sas_to_dev():
 
     mapping = {}
 
-    output_saslist = sysexec(
-        "ls -alh /dev/disk/by-id"
-    )
+    output_saslist = sysexec("ls -alh /dev/disk/by-id")
 
     for line in output_saslist.splitlines():
 
@@ -372,9 +543,7 @@ def map_sas_to_rid():
     #
     dev_to_rid = {}
 
-    output = sysexec(
-        "ls -alh /dev/disk/by-label"
-    )
+    output = sysexec("ls -alh /dev/disk/by-label")
 
     for line in output.splitlines():
 
@@ -444,9 +613,7 @@ def map_sas_to_rid():
 
             base = os.path.basename(dev)
 
-            dev_wwid = sysexec(
-                f"cat /sys/block/{base}/device/wwid"
-            ).strip()
+            dev_wwid = sysexec(f"cat /sys/block/{base}/device/wwid").strip()
 
             if (
                 not dev_wwid
@@ -462,9 +629,7 @@ def map_sas_to_rid():
                     candidate_dev
                 )
 
-                candidate_wwid = sysexec(
-                    f"cat /sys/block/{candidate_base}/device/wwid"
-                ).strip()
+                candidate_wwid = sysexec(f"cat /sys/block/{candidate_base}/device/wwid").strip()
 
                 if (
                     not candidate_wwid
@@ -493,88 +658,53 @@ def map_sas_to_rid():
                 f"{dev} ({exc})"
             )
 
-    return mapping
+    return mapping, dev_to_rid
 
 
 def map_backplane_slot_to_sas(backplanes):
-
-    """
-    Return Backplane/Slot -> SES SAS map
-    """
-
     debug("map_backplane_slot_to_sas()")
-
     mapping = {}
 
     for this_backplane in backplanes:
-
         mapping[this_backplane] = {}
+        output_sgses = sysexec(f"sg_ses -p aes {this_backplane}")
 
-        output_sgses = sysexec(
-            f"sg_ses -p aes {this_backplane}"
-        )
-
+        current_type = None
         val_slot = None
         val_sas = None
 
         for line in output_sgses.splitlines():
-
-            if (
-                not re.search(
-                    "Element index:",
-                    line
-                )
-                and not re.search(
-                    "SAS address",
-                    line
-                )
-            ):
+            line = line.strip()
+            if not line:
                 continue
 
-            if re.search(
-                "attached SAS address",
-                line
-            ):
+            # Track the current "Element type" section
+            type_match = re.search(r"Element type:\s+(.+?)(?:,|$)", line)
+            if type_match:
+                current_type = type_match.group(1).strip()
+
+            # Skip lines that aren't relevant to our parsing logic
+            if not re.search(r"Element index:", line) and not re.search(r"SAS address:", line):
+                continue
+            if re.search(r"attached SAS address", line):
                 continue
 
-            if re.search(
-                "Element index:",
-                line
-            ):
+            if re.search(r"Element index:", line):
+                val_slot = line.split(":")[1].strip()
+                val_slot = val_slot.split(" ")[0]
 
-                val_slot = line.split(":")[1]
-                val_slot = val_slot.split(" ")[1]
-
-            if re.search(
-                "SAS address",
-                line
-            ):
-
-                val_sas = line.split(":")[1]
-                val_sas = re.sub(
-                    " ",
-                    "",
-                    val_sas,
-                )
-
-                val_sas = re.sub(
-                    "^0x",
-                    "",
-                    val_sas,
-                ).lower()
+            if re.search(r"SAS address:", line):
+                val_sas = line.split(":")[1].strip()
+                val_sas = val_sas.replace(" ", "")
+                val_sas = re.sub(r"^0x", "", val_sas).lower()
 
             if val_slot and val_sas:
+                # ✅ Only process mappings for Array device slots
+                if current_type == "Array device slot":
+                    debug(f"{this_backplane} slot {val_slot} -> {val_sas}")
+                    mapping[this_backplane][val_slot] = val_sas
 
-                debug(
-                    f"{this_backplane} "
-                    f"slot {val_slot} "
-                    f"-> {val_sas}"
-                )
-
-                mapping[
-                    this_backplane
-                ][val_slot] = val_sas
-
+                # Reset for next element block
                 val_slot = None
                 val_sas = None
 
@@ -604,6 +734,14 @@ def map_backplane_slot_to_dev(
     #
     linux_sas_to_dev = map_sas_to_dev()
 
+    enclosure_slot_map = (
+        map_enclosure_slot_to_dev()
+    )
+
+    sg_to_enclosure = (
+        map_sg_to_enclosure()
+    )
+
     for backplane in all_backplanes:
 
         mapping[backplane] = {}
@@ -632,18 +770,45 @@ def map_backplane_slot_to_dev(
                 and ses_sas != "0"
             ):
 
-                #
-                # Normalize SES SAS into Linux WWN form
-                #
                 linux_sas = normalize_sas_for_linux(
                     ses_sas
                 )
 
+                #
+                # Preferred:
+                # SAS WWN mapping
+                #
                 if linux_sas in linux_sas_to_dev:
 
                     dev = linux_sas_to_dev[
                         linux_sas
                     ]
+
+                #
+                # Fallback:
+                # Linux enclosure mapping
+                #
+                else:
+
+                    enclosure = (
+                        sg_to_enclosure.get(backplane)
+                    )
+
+                    if enclosure:
+
+                        dev = (
+                            enclosure_slot_map
+                            .get(enclosure, {})
+                            .get(slot, "Empty_Slot")
+                        )
+
+                        debug(
+                            f"Enclosure fallback: "
+                            f"{backplane} -> "
+                            f"{enclosure} "
+                            f"slot {slot} "
+                            f"-> {dev}"
+                        )
 
             mapping[backplane][slot] = dev
 
@@ -660,10 +825,6 @@ def main():
 
     backplane_list = find_backplanes()
 
-    if not backplane_list:
-        print("No enclosures detected.")
-        return
-
     (
         backplane_slot_to_dev,
         backplane_slot_to_sas,
@@ -671,9 +832,11 @@ def main():
         backplane_list,
     )
 
-    sas_to_rid = map_sas_to_rid()
+    sas_to_rid, dev_to_rid = map_sas_to_rid()
 
     linux_sas_to_dev = map_sas_to_dev()
+
+#    dev_to_rid = map_dev_to_rid()
 
     mapped_devices = set()
 
@@ -709,32 +872,48 @@ def main():
 
             rid = "Empty"
 
-            if (
-                sas
-                and sas != "0"
-            ):
+            #
+            # Preferred:
+            # SAS -> RID
+            #
+            if sas and sas != "0":
 
-                normalized_sas = (
-                    normalize_sas_for_linux(
-                        sas
-                    )
+                normalized_sas = normalize_sas_for_linux(
+                    sas
                 )
 
-                if normalized_sas in sas_to_rid:
+                rid = sas_to_rid.get(
+                    normalized_sas,
+                    "Empty",
+                )
 
-                    rid = sas_to_rid[
-                        normalized_sas
-                    ]
+            #
+            # Fallback:
+            # DEV -> RID
+            #
+            if rid == "Empty" and dev != "Empty_Slot":
+
+                rid = dev_to_rid.get(
+                    canonicalize_dev(dev),
+                    "Empty",
+                )
+
+                if rid != "Empty":
+
+                    debug(
+                        f"RID device fallback: "
+                        f"{dev} -> {rid}"
+                    )
 
             #
             # Skip phantom SES elements
             #
-            if (
-                sas != "0"
-                and dev == "Empty_Slot"
-                and rid == "Empty"
-            ):
-                continue
+            #if (
+            #    sas != "0"
+            #    and dev == "Empty_Slot"
+            #    and rid == "Empty"
+            #):
+            #    continue
 
             #
             # Track mapped devices
