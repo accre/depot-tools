@@ -21,8 +21,7 @@ from prettytable import PrettyTable
 # Cache info
 _CACHE = {}
 
-PRINT_DEBUG = False
-
+PRINT_DEBUG = True
 
 def Debug(input_txt):
 
@@ -330,8 +329,13 @@ def HumanFriendlyVendor(Vendor, Model):
     if Vendor.startswith("ST") or Model.startswith("ST"):
         return "Seagate"
 
-    return Vendor.strip()
+    if re.search("INTEL", Model):
+        return "Intel"
 
+    if re.search("Hitachi", Model):
+        return "Hitachi"
+
+    return Vendor.strip()
 
 def HumanFriendlyModel(Vendor, Model):
 
@@ -340,6 +344,12 @@ def HumanFriendlyModel(Vendor, Model):
 
     if Model.startswith("ST"):
         return Model
+
+    if re.search("INTEL_", model):
+        return model.replace("INTEL_", "")
+
+    if re.search("Hitachi", model):
+        return model.replace("Hitachi_", "")
 
     return Model.strip()
 
@@ -498,6 +508,9 @@ x = PrettyTable([
 x.padding_width = 1
 x.align = "l"
 
-x.add_rows(output)
+output.sort(key=lambda r: (r[0], int(r[1]) if r[1] != "-" else -1))
+
+for row in output:
+    x.add_row(row)
 
 print(x)
