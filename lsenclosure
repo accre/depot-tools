@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 
 """
-lsbackplane - List block devices attached to a storage backplane
-
-Corrected version:
-- Deduplicates multipath SAS devices by WWN
-- Shows all OS block devices associated with a physical disk
-- Deduplicates SES enclosures
+lsenclosure - List block devices attached to a storage backplane
 """
 
 import re
@@ -16,22 +11,32 @@ import time
 
 from subprocess import Popen, PIPE, STDOUT
 from shutil import which
-from prettytable import PrettyTable
+
+# ------------------------------------------------------------------
+# Dependency Check
+# ------------------------------------------------------------------
+try:
+    from prettytable import PrettyTable
+except ImportError:
+    print("ERROR: Python module 'prettytable' is not installed.")
+    print("Please install it using: pip3 install prettytable")
+    sys.exit(1)
 
 # Cache info
 _CACHE = {}
 
-PRINT_DEBUG = True
+PRINT_DEBUG = False
 
-def Debug(input_txt):
-
-    if PRINT_DEBUG:
-
-        if isinstance(input_txt, dict):
-            for k in input_txt.keys():
-                print("DEBUG: " + str(k) + " - " + str(input_txt[k]))
+def Debug(*args):
+    """Accepts one or more arguments. Prints dicts key-by-value, others as strings."""
+    if not PRINT_DEBUG:
+        return
+    for arg in args:
+        if isinstance(arg, dict):
+            for k in arg.keys():
+                print("DEBUG: " + str(k) + " - " + str(arg[k]))
         else:
-            print("DEBUG: " + str(input_txt))
+            print("DEBUG: " + str(arg))
 
 
 def SysExec(cmd):
@@ -64,7 +69,7 @@ for bin in ("sg_ses", "sg_vpd", "lsblk", "lsscsi"):
 
 
 def parse_lsblk():
-
+    Debug("ENTER: parse_lsblk")
     m = {}
 
     for line in SysExec("lsblk -O -P").splitlines():
@@ -84,11 +89,12 @@ def parse_lsblk():
 
         m["/dev/" + name] = keyval
 
+    Debug("EXIT: parse_lsblk", {"count": len(m), "sample_keys": list(m.keys())[:3]})
     return m
 
 
 def parse_lsblk_disks():
-
+    Debug("ENTER: parse_lsblk_disks")
     raw = parse_lsblk()
 
     disks = {}
@@ -103,11 +109,12 @@ def parse_lsblk_disks():
 
         disks[k] = raw[k]
 
+    Debug("EXIT: parse_lsblk_disks", {"count": len(disks)})
     return disks
 
 
 def parse_lsscsi():
-
+    Debug("ENTER: parse_lsscsi")
     m = {}
 
     c = 0
@@ -134,11 +141,12 @@ def parse_lsscsi():
             "type": type_,
         }
 
+    Debug("EXIT: parse_lsscsi", {"count": len(m)})
     return m
 
 
 def parse_lsscsi_disks():
-
+    Debug("ENTER: parse_lsscsi_disks")
     raw = parse_lsscsi()
 
     out = {}
@@ -150,11 +158,12 @@ def parse_lsscsi_disks():
 
         out[k] = raw[k]
 
+    Debug("EXIT: parse_lsscsi_disks", {"count": len(out)})
     return out
 
 
 def parse_lsscsi_enclosures():
-
+    Debug("ENTER: parse_lsscsi_enclosures")
     raw = parse_lsscsi()
 
     out = {}
@@ -166,6 +175,7 @@ def parse_lsscsi_enclosures():
 
         out[k] = raw[k]
 
+    Debug("EXIT: parse_lsscsi_enclosures", {"count": len(out)})
     return out
 
 
@@ -175,7 +185,7 @@ def parse_lsscsi_enclosures():
 
 
 def aggregate_physical_disks(map_lsblk):
-
+    Debug("ENTER: aggregate_physical_disks")
     """
     Group all paths to the same physical disk by WWN.
     """
@@ -207,6 +217,7 @@ def aggregate_physical_disks(map_lsblk):
                 if key in d:
                     physical[wwn][key] = d[key]
 
+    Debug("EXIT: aggregate_physical_disks", {"count": len(physical)})
     return physical
 
 
@@ -214,20 +225,17 @@ def aggregate_physical_disks(map_lsblk):
 # ENCLOSURE HANDLING
 ######################################################################
 
-
 def map_enclosures():
-
+    Debug("ENTER: map_enclosures")
     raw = parse_lsscsi_enclosures()
 
     dedup = {}
-
-    #
-    # Deduplicate enclosures by SAS WWN
-    #
-
+    
+    # Counter to ensure unique suffixes if multiple backplanes share similar traits
+    # We'll assign unique IDs based on the order they appear in 'raw'
+    enclosure_index = 0
 
     for sd_dev, d in raw.items():
-
         wwn = d["sas_wwn"]
 
         if wwn in dedup:
@@ -237,44 +245,61 @@ def map_enclosures():
 
         dedup[wwn] = dict(d)
 
-        #
-        # Determine slot count
-        #
+        # Determine slot count ONLY for Array device slots
+        ses_output = SysExec("sg_ses -p aes " + str(sg_dev))
+        lines = ses_output.splitlines()
 
-        output = SysExec("sg_ses -p aes " + str(sg_dev)).splitlines()
-
+        current_element_type = ""
         num_slots = 0
+        drive_slot_indices = []
 
-        for i in output:
+        for line in lines:
+            if "Element type:" in line:
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    current_element_type = parts[1].strip()
+                continue
 
-            if re.search("Element type: SAS expander", i):
-                break
-
-            if re.search("Element index:", i):
-                num_slots += 1
+            if "Element index:" in line:
+                if "Array device slot" in current_element_type:
+                    try:
+                        idx_part = line.split(":")[1].strip()
+                        idx_str = idx_part.split()[0]
+                        num_slots += 1
+                        drive_slot_indices.append(int(idx_str))
+                    except (ValueError, IndexError):
+                        pass
 
         dedup[wwn]["num_slots"] = num_slots
+        dedup[wwn]["drive_slot_indices"] = drive_slot_indices
+        dedup[wwn]["sg_dev"] = sg_dev # Ensure sg_dev is stored in dedup
 
-        if num_slots == 12:
-            dedup[wwn]["alias"] = "Back"
-
+        # Assign Base Alias
+        base_alias = "Unknown"
+        if num_slots == 31:
+            base_alias = "Valiant"
         elif num_slots == 24:
-            dedup[wwn]["alias"] = "Front"
-
-        elif num_slots == 31:
-            dedup[wwn]["alias"] = "Valiant"
-
+            base_alias = "Back"
+        elif num_slots == 12:
+            base_alias = "Front"
         elif num_slots == 36:
-            dedup[wwn]["alias"] = "Unified"
+            base_alias = "Unified"
+        elif num_slots == 30:
+             base_alias = "Valiant" # Fallback for the other Valiant backplane
 
-        else:
-            dedup[wwn]["alias"] = "Unknown"
+        # Make Unique: Append index to the alias
+        # Example: "Valiant_1", "Valiant_2"
+        unique_alias = f"{base_alias}_{enclosure_index + 1}"
+        dedup[wwn]["alias"] = unique_alias
+        
+        enclosure_index += 1
 
+    Debug("EXIT: map_enclosures", {"count": len(dedup), "wwns": list(dedup.keys()), "aliases": {k: v['alias'] for k, v in dedup.items()}})
     return dedup
 
 
 def map_enclosure_slots(enclosures):
-
+    Debug("ENTER: map_enclosure_slots")
     slotmap = {}
 
     for enc_wwn, enc in enclosures.items():
@@ -313,7 +338,85 @@ def map_enclosure_slots(enclosures):
 
                 slotmap[sg_dev][slot] = sas_wwn
 
+    Debug("EXIT: map_enclosure_slots", {"sg_devs": list(slotmap.keys()), "sample_slots": {k: list(v.keys())[:3] for k, v in slotmap.items()}})
     return slotmap
+
+
+# ------------------------------------------------------------------
+# Sysfs Fallback Mappers
+# ------------------------------------------------------------------
+
+def map_sg_to_enclosure():
+    Debug("ENTER: map_sg_to_enclosure")
+    """
+    Map /dev/sgX devices to Linux sysfs enclosure names.
+    """
+    mapping = {}
+    enclosure_root = "/sys/class/enclosure"
+    if not os.path.isdir(enclosure_root):
+        Debug("EXIT: map_sg_to_enclosure (no enclosure root)", mapping)
+        return mapping
+
+    for enc_name in os.listdir(enclosure_root):
+        enc_path = os.path.realpath(os.path.join(enclosure_root, enc_name))
+        enc_parent = os.path.dirname(os.path.dirname(enc_path))
+        
+        for sg in os.listdir("/sys/class/scsi_generic"):
+            sg_path = os.path.realpath(f"/sys/class/scsi_generic/{sg}/device")
+            if sg_path == enc_parent:
+                mapping[f"/dev/{sg}"] = enc_name
+                
+    Debug("EXIT: map_sg_to_enclosure", mapping)
+    return mapping
+
+
+def map_enclosure_slots_sysfs():
+    Debug("ENTER: map_enclosure_slots_sysfs")
+    """
+    Map Linux sysfs enclosure names to slot -> /dev/sdX mappings.
+    Handles SATA drives that SES often reports as empty/0x0.
+    """
+    mapping = {}
+    enclosure_root = "/sys/class/enclosure"
+    if not os.path.isdir(enclosure_root):
+        Debug("EXIT: map_enclosure_slots_sysfs (no enclosure root)", mapping)
+        return mapping
+
+    for enc_name in os.listdir(enclosure_root):
+        enc_path = os.path.join(enclosure_root, enc_name)
+        mapping[enc_name] = {}
+        
+        try:
+            slot_entries = os.listdir(enc_path)
+        except OSError:
+            continue
+            
+        for slot_name in slot_entries:
+            slot_path = os.path.join(enc_path, slot_name)
+            if not os.path.isdir(slot_path):
+                continue
+                
+            block_dir = os.path.join(slot_path, "device", "block")
+            if not os.path.isdir(block_dir):
+                continue
+                
+            try:
+                devices = os.listdir(block_dir)
+            except OSError:
+                continue
+                
+            if not devices:
+                continue
+                
+            dev = "/dev/" + devices[0]
+            slot_match = re.search(r"(\d+)", slot_name)
+            if not slot_match:
+                continue
+                
+            mapping[enc_name][int(slot_match.group(1))] = dev
+            
+    Debug("EXIT: map_enclosure_slots_sysfs", mapping)
+    return mapping
 
 
 ######################################################################
@@ -322,64 +425,94 @@ def map_enclosure_slots(enclosures):
 
 
 def HumanFriendlyVendor(Vendor, Model):
-
+    Debug("ENTER: HumanFriendlyVendor", {"Vendor": Vendor, "Model": Model})
     Vendor = re.sub("_", " ", Vendor)
     Model = re.sub("_", " ", Model)
 
-    if Vendor.startswith("ST") or Model.startswith("ST"):
-        return "Seagate"
-
     if re.search("INTEL", Model):
-        return "Intel"
+        out = "Intel"
+        Debug("EXIT: HumanFriendlyVendor", {"result": out})
+        return out
 
     if re.search("Hitachi", Model):
-        return "Hitachi"
+        out = "Hitachi"
+        Debug("EXIT: HumanFriendlyVendor", {"result": out})
+        return out
 
-    return Vendor.strip()
+    if re.search("TOSHIBA", Vendor):
+        out = "Toshiba"
+        Debug("EXIT: HumanFriendlyVendor", {"result": out})
+        return out
+
+    if Vendor.startswith("ST") or Model.startswith("ST"):
+        out = "Seagate"
+        Debug("EXIT: HumanFriendlyVendor", {"result": out})
+        return out
+
+    out = Vendor.strip()
+    Debug("EXIT: HumanFriendlyVendor", {"result": out})
+    return out
 
 def HumanFriendlyModel(Vendor, Model):
-
+    Debug("ENTER: HumanFriendlyModel", {"Vendor": Vendor, "Model": Model})
     Vendor = re.sub("_", " ", Vendor)
     Model = re.sub("_", " ", Model)
 
     if Model.startswith("ST"):
-        return Model
+        out = Model
+        Debug("EXIT: HumanFriendlyModel", {"result": out})
+        return out
 
-    if re.search("INTEL_", model):
-        return model.replace("INTEL_", "")
+    if re.search("INTEL_", Model):  # Fixed typo: model -> Model
+        out = Model.replace("INTEL_", "")
+        Debug("EXIT: HumanFriendlyModel", {"result": out})
+        return out
 
-    if re.search("Hitachi", model):
-        return model.replace("Hitachi_", "")
+    if re.search("Hitachi", Model):
+        out = Model.replace("Hitachi ", "")
+        Debug("EXIT: HumanFriendlyModel", {"result": out})
+        return out
 
-    return Model.strip()
+    out = Model.strip()
+    Debug("EXIT: HumanFriendlyModel", {"result": out})
+    return out
 
 
 def HumanFriendlySerial(Serial, Vendor, Model):
-
+    Debug("ENTER: HumanFriendlySerial", {"Serial": Serial, "Vendor": Vendor})
     Serial = Serial.strip()
 
     if Vendor == "SEAGATE":
         Serial = Serial[:8]
 
-    if not Serial:
-        return "NO_SERIAL"
+#    if re.search("Hitachi", Model):
 
-    return Serial
+    if not Serial:
+        out = "NO_SERIAL"
+        Debug("EXIT: HumanFriendlySerial", {"result": out})
+        return out
+
+    out = Serial
+    Debug("EXIT: HumanFriendlySerial", {"result": out})
+    return out
 
 
 ######################################################################
 # MAIN
 ######################################################################
 
+Debug("=== START MAIN EXECUTION ===")
 
 map_lsblk = parse_lsblk_disks()
+Debug("Parsed lsblk disks", {"count": len(map_lsblk), "devices": list(map_lsblk.keys())})
 
 map_lsscsi = parse_lsscsi_disks()
+Debug("Parsed lsscsi disks", {"count": len(map_lsscsi), "devices": list(map_lsscsi.keys())})
 
 #
 # Augment lsblk data
 #
-
+Debug("Augmenting lsblk data with lsscsi metadata...")
 for sd_dev, d in map_lsscsi.items():
 
     if sd_dev not in map_lsblk:
@@ -389,101 +522,185 @@ for sd_dev, d in map_lsscsi.items():
     map_lsblk[sd_dev]["hctl"] = d["hctl"]
     map_lsblk[sd_dev]["lsscsi_wwn"] = d["sas_wwn"]
 
+Debug("Augmentation complete")
+
 #
 # Map enclosures
 #
-
+Debug("Mapping enclosures...")
 enclosures = map_enclosures()
+Debug("Enclosures mapped", {"count": len(enclosures)})
 
+Debug("Mapping enclosure slots via SES...")
 slotmap = map_enclosure_slots(enclosures)
+Debug("SES slotmap generated", {"count": len(slotmap)})
+
+# NEW: Load sysfs fallback mappings for SATA/unmapped drives
+Debug("Loading sysfs SG->Enclosure mapping...")
+sg_to_enc = map_sg_to_enclosure()
+
+Debug("Loading sysfs Enclosure->Slot mapping...")
+enc_slot_map = map_enclosure_slots_sysfs()
 
 #
-# Map enclosure slots onto sd devices
+# Map enclosure slots onto sd devices (Enhanced)
 #
+######################################################################
+# ROBUST SLOT MAPPING & OUTPUT
+######################################################################
 
+Debug("Mapping enclosure slots onto devices & collecting all slots...")
+
+# 1. Build a complete list of all expected slots across all enclosures
+all_slots = []
 for enc_wwn, enc in enclosures.items():
-
-    sg_dev = enc["sg_dev"]
-
     alias = enc["alias"]
+    sg_dev = enc["sg_dev"]
+    enc_hctl = enc.get("hctl", "")
+    num_slots = enc["num_slots"]
+    ses_slots = slotmap.get(sg_dev, {})
 
-    if sg_dev not in slotmap:
+    for s in range(num_slots):
+        s_str = str(s)
+        ses_wwn = ses_slots.get(s_str, "EMPTY")
+        all_slots.append({
+            "alias": alias,
+            "sg_dev": sg_dev,
+            "hctl": enc_hctl,
+            "slot": s_str,
+            "ses_wwn": ses_wwn,
+            "drive_wwn": None,
+            "drive_data": None,
+            "matched_by": None
+        })
+
+# 2. First Pass: Match drives to slots using SES WWN (±2 heuristic)
+for slot_info in all_slots:
+    if slot_info["ses_wwn"] == "EMPTY":
         continue
+    ses_wwn = slot_info["ses_wwn"]
+    ses_wwn_int = int(ses_wwn, 16)
 
-    for slot, ses_wwn in slotmap[sg_dev].items():
-
-        if ses_wwn == "EMPTY":
+    for sd_dev, d in map_lsblk.items():
+        if slot_info["drive_wwn"]:
+            continue
+        drive_wwn = d.get("WWN", "")
+        if not drive_wwn:
             continue
 
-        #
-        # Match all paths by WWN
-        #
+        diff = abs(int(drive_wwn, 16) - ses_wwn_int)
+        if diff <= 2:
+            slot_info["drive_wwn"] = drive_wwn
+            slot_info["drive_data"] = d
+            slot_info["matched_by"] = "wwn"
+            break
 
-        for sd_dev, d in map_lsblk.items():
+# 3. Second Pass: HCTL Bus Fallback for unmapped drives
+# Catches drives that `sg_ses` doesn't report but share the same SCSI bus as the backplane
+for sd_dev, d in map_lsblk.items():
+    if any(sl["drive_wwn"] == d.get("WWN", "") for sl in all_slots):
+        continue # Already matched
+    if "backplane" in d:
+        continue
 
-            drive_wwn = d.get("WWN", "")
+    drive_hctl = d.get("hctl", "")
+    if not drive_hctl:
+        continue
 
-            if not drive_wwn:
-                continue
+    parts = drive_hctl.split(":")
+    drive_bus = ":".join(parts[:3]) if len(parts) >= 3 else drive_hctl
 
-            #
-            # SES tends to be off-by-one
-            #
+    for slot_info in all_slots:
+        if slot_info["drive_wwn"]:
+            continue # Slot already taken
 
-            candidates = [
-                hex(int(drive_wwn, 16) - 2),
-                hex(int(drive_wwn, 16) - 1),
-                drive_wwn,
-                hex(int(drive_wwn, 16) + 1),
-                hex(int(drive_wwn, 16) + 2),
-            ]
+        enc_bus = ":".join(slot_info["hctl"].split(":")[:3]) if slot_info["hctl"] else ""
+        if drive_bus == enc_bus:
+            slot_info["drive_wwn"] = d.get("WWN", "")
+            slot_info["drive_data"] = d
+            slot_info["matched_by"] = "hctl"
+            break
 
-            if ses_wwn in candidates:
+# 4. Third Pass: Sysfs Fallback (handles SATA drives where SES reports 0x0)
+for enc_wwn, enc in enclosures.items():
+    sg_dev = enc["sg_dev"]
+    sysfs_enc = sg_to_enc.get(sg_dev)
+    if not sysfs_enc or sysfs_enc not in enc_slot_map:
+        continue
 
-                map_lsblk[sd_dev]["backplane"] = sg_dev
-                map_lsblk[sd_dev]["slot"] = slot
-                map_lsblk[sd_dev]["bp_alias"] = alias
+    for s in sorted(enc_slot_map[sysfs_enc].keys()):
+        dev = enc_slot_map[sysfs_enc][s]
+        if dev not in map_lsblk:
+            continue
+        d = map_lsblk[dev]
+        dev_wwn = d.get("WWN", "")
 
-#
+        for slot in all_slots:
+            if slot["alias"] == enc["alias"] and not slot["drive_wwn"]:
+                already_matched = any(sl["drive_wwn"] == dev_wwn for sl in all_slots)
+                if not already_matched:
+                    slot["drive_wwn"] = dev_wwn
+                    slot["drive_data"] = d
+                    slot["matched_by"] = "sysfs"
+                    break
+
+# Apply matches back to map_lsblk for the aggregation step
+for slot_info in all_slots:
+    if slot_info["drive_data"]:
+        d = slot_info["drive_data"]
+        d["backplane"] = slot_info["sg_dev"]
+        d["slot"] = slot_info["slot"]
+        d["bp_alias"] = slot_info["alias"]
+
+Debug("Slot mapping complete")
+
 # Collapse multiple sd devices into physical disks
-#
-
+Debug("Aggregating physical disks...")
 physical_disks = aggregate_physical_disks(map_lsblk)
+Debug("Physical disks aggregated", {"count": len(physical_disks)})
 
 ######################################################################
 # OUTPUT
 ######################################################################
 
+Debug("Generating output table...")
 output = []
 
-for wwn, d in physical_disks.items():
+for s in all_slots:
+    slot_str = s["slot"]
+    alias_bp = s["alias"]
+    
+    # Retrieve data from aggregated physical_disks if possible, else fallback to raw mapping
+    disk_data = physical_disks.get(s["drive_wwn"], s["drive_data"]) if s["drive_wwn"] else s["drive_data"]
+    
+    if disk_data:
+        devs = ",".join(sorted(disk_data.get("DEVICES", [s["drive_wwn"]])))
+        vendor = str(disk_data.get("VENDOR", "")).strip()
+        model = str(disk_data.get("MODEL", "")).strip()
+        serial = str(disk_data.get("SERIAL", "")).strip()
+        firmware = str(disk_data.get("REV", "")).strip()
+        size = str(disk_data.get("SIZE", "")).strip()
+        rota = str(disk_data.get("ROTA", "")).strip()
+        rota_txt = {"1": "hd", "0": "ssd"}.get(rota, "unknown")
+        media = "disk:" + rota_txt
 
-    alias_bp = str(d.get("bp_alias", "Direct"))
-    slot = str(d.get("slot", "-"))
-
-    vendor = str(d["VENDOR"]).strip()
-    model = str(d["MODEL"]).strip()
-    serial = str(d["SERIAL"]).strip()
-
-    firmware = str(d["REV"]).strip()
-
-    h_vendor = HumanFriendlyVendor(vendor, model)
-    h_model = HumanFriendlyModel(vendor, model)
-    h_serial = HumanFriendlySerial(serial, vendor, model)
-
-    size = str(d["SIZE"])
-
-    rota = str(d["ROTA"])
-
-    rota_txt = {"1": "hd", "0": "ssd"}.get(rota, "unknown")
-
-    media = "disk:" + rota_txt
-
-    devs = ",".join(sorted(d["DEVICES"]))
+        h_vendor = HumanFriendlyVendor(vendor, model)
+        h_model = HumanFriendlyModel(vendor, model)
+        h_serial = HumanFriendlySerial(serial, vendor, model)
+    else:
+        # Empty slot formatting
+        devs = "-"
+        h_vendor = "-"
+        h_model = "-"
+        h_serial = "-"
+        firmware = "-"
+        media = "-"
+        size = "-"
+        rota_txt = "-"
 
     output.append([
         alias_bp,
-        slot,
+        slot_str,
         devs,
         h_vendor,
         h_model,
@@ -508,9 +725,16 @@ x = PrettyTable([
 x.padding_width = 1
 x.align = "l"
 
-output.sort(key=lambda r: (r[0], int(r[1]) if r[1] != "-" else -1))
+# Sort: Direct first, then by backplane alias, then numerically by slot
+output.sort(key=lambda r: (
+    0 if r[0] == "Direct" else 1, 
+    r[0], 
+    int(r[1]) if r[1] != "-" else 999999
+))
 
 for row in output:
     x.add_row(row)
 
+Debug("Output table generation complete", {"rows": len(output)})
 print(x)
+Debug("=== END MAIN EXECUTION ===")
