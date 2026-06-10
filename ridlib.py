@@ -22,15 +22,17 @@ import subprocess
 import collections
 import configparser
 import multiprocessing
+import shlex
 
+from pathlib import Path
 from subprocess import Popen, PIPE, STDOUT, call, check_output
 from time import gmtime, strftime, sleep
+from typing import Union
 
 depot_dir = "/depot"  # This was originally shared via the depot_common file.
 
 CacheDataArray = {}
 CacheTimeArray = {}
-
 
 def SysExec(cmd):
     """
@@ -68,12 +70,11 @@ def SysExec(cmd):
 
     # If we don't have cached data, or it's too old, regenerate it
     elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-        CacheDataArray[cmd] = Popen(
-            cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+        CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
         CacheTimeArray[cmd] = time.time()
         Return_Val = CacheDataArray[cmd]
 
-    if str(type(Return_Val)) == "<class 'bytes'>":
+    if isinstance(Return_Val, bytes):
         Return_Val = Return_Val.decode("utf-8")
 
     return Return_Val
@@ -88,11 +89,303 @@ def SysExecUncached(cmd):
 
     output = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
 
-    if str(type(output)) == "<class 'bytes'>":
+    if isinstance(output, bytes):
         output = output.decode("utf-8")
 
     return output
 
+
+###################################################################################
+
+def _read_proc_mounts():
+    """Return a list of (dev, mp) tuples from /proc/mounts."""
+    with open("/proc/mounts", "r", encoding="utf-8") as f:
+        return [(line.split()[0], line.split()[1]) for line in f if line.strip()]
+
+def _is_device_mounted(dev):
+    """True if *dev* appears as the first field in /proc/mounts."""
+    return any(dev == d for d, _ in _read_proc_mounts())
+
+def _is_mpoint_mounted(mpoint):
+    """True if *mpoint* appears as the second field in /proc/mounts."""
+    return any(mpoint == mp for _, mp in _read_proc_mounts())
+
+def _run_cmd(cmd_list, **kwargs):
+    """
+    Run a command, capture stdout+stderr, raise on failure.
+    Returns the decoded output (str).
+    """
+    result = subprocess.run(
+        cmd_list,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        **kwargs,
+    )
+    if result.returncode:
+        logging.error(
+            "Command failed (%s): %s", " ".join(cmd_list), result.stdout.strip()
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd_list, output=result.stdout
+        )
+    return result.stdout.strip()
+
+def _resolve_path(p: str) -> Path:
+    """
+    Return a ``Path`` that is absolute and fully resolved.
+    If *p* is a symlink we resolve it, otherwise we just normalise it.
+    """
+    return Path(p).expanduser().resolve()
+
+def _run_cmd_checked(cmd: list, **kwargs) -> str:
+    """
+    Run a command with ``subprocess.run`` and raise on non‑zero exit.
+    Returns the stripped stdout (as a string because ``text=True``).
+    """
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=True,
+        **kwargs,
+    )
+    return result.stdout.strip()
+
+#########################################
+
+def mount_unix(device: str,
+               mountpoint: str,
+               mount_opts: Union[str, list] = "") -> int:   # <-- Union replaces “str | list”
+    """
+    Mount *device* on *mountpoint*.
+
+    * Returns 0 on success, otherwise the subprocess return code.
+    * Guarantees that *mountpoint* exists (mkdir -p behaviour).
+    * Checks that the *device* is not already mounted and that the
+      *mountpoint* is not already used.
+    * ``mount_opts`` can be a space‑separated string **or** a list of
+      arguments (e.g. ['-o', 'noatime,nodiratime']).
+    """
+    dev_path = str(device)
+    mp_path = str(mountpoint)
+
+    # -----------------------------------------------------------------
+    # 1️⃣ sanity checks
+    # -----------------------------------------------------------------
+    if _is_device_mounted(dev_path):
+        logging.error("mount_unix: device %s already mounted", dev_path)
+        return 1
+
+    if _is_mpoint_mounted(mp_path):
+        logging.error("mount_unix: mountpoint %s already in use", mp_path)
+        return 1
+
+    # Ensure the directory exists – replace a stray file with a dir
+    mp_dir = _resolve_path(mp_path)
+    if mp_dir.is_file():
+        logging.warning("mount_unix: %s is a file, removing to create directory", mp_dir)
+        mp_dir.unlink()
+    mp_dir.mkdir(parents=True, exist_ok=True)
+
+    # -----------------------------------------------------------------
+    # 2️⃣ build the command
+    # -----------------------------------------------------------------
+    cmd = ["mount"]
+    # Normalise mount_opts to a list
+    if isinstance(mount_opts, str):
+        mount_opts = shlex.split(mount_opts)
+    if mount_opts:
+        # Make sure the caller supplied the “-o” flag – many callers
+        # pass just “noatime,nodiratime”.
+        if "-o" not in mount_opts and not any(opt.startswith("-o") for opt in mount_opts):
+            mount_opts = ["-o"] + mount_opts
+        cmd.extend(mount_opts)
+
+    cmd.extend([dev_path, str(mp_dir)])
+
+    logging.debug("mount_unix: exec %s", " ".join(cmd))
+
+    # -----------------------------------------------------------------
+    # 3️⃣ run it – retry a few times because the kernel can be slow
+    # -----------------------------------------------------------------
+    for attempt in range(1, 5):
+        try:
+            _run_cmd_checked(cmd)
+        except subprocess.CalledProcessError as exc:
+            if attempt == 4:
+                logging.error("mount_unix: command failed after %d attempts: %s", attempt, exc)
+                return exc.returncode
+            backoff = 0.2 * (2 ** (attempt - 1))
+            logging.debug("mount_unix: retry %d after %.1fs", attempt + 1, backoff)
+            sleep(backoff)
+            continue
+        break   # success
+
+    # -----------------------------------------------------------------
+    # 4️⃣ double‑check that the *expected* device really appears at the mount point
+    # -----------------------------------------------------------------
+    for _ in range(6):
+        if _is_mpoint_mounted(str(mp_dir)):
+            with open("/proc/mounts") as f:
+                for line in f:
+                    dev, mp = line.split()[:2]
+                    if mp == str(mp_dir) and dev == dev_path:
+                        logging.debug("mount_unix: %s successfully mounted on %s", dev_path, mp_path)
+                        return 0
+        sleep(0.2)
+
+    logging.error("mount_unix: %s not present in /proc/mounts after mount", mp_path)
+    return 1
+
+
+def umount_unix(mountpoint: str) -> int:
+    """
+    Unmount *mountpoint* (normal then lazy if needed).
+
+    * Works for real directories **and** symlinks that point to a mount.
+    * Retries a couple of times with exponential back‑off.
+    * Returns the exit status of the *last* umount attempt (0 = success).
+    """
+    mp_path = str(mountpoint)
+    mp_resolved = _resolve_path(mp_path)
+
+    if not mp_resolved.exists():
+        logging.error("umount_unix: %s does not exist", mp_path)
+        return 1
+
+    # -----------------------------------------------------------------
+    # Helper that runs ``umount`` and returns a CompletedProcess
+    # -----------------------------------------------------------------
+    def _do_umount(args: list) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["umount"] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    # -----------------------------------------------------------------
+    # 1️⃣ normal umount (tries up to 3 times)
+    # -----------------------------------------------------------------
+    for attempt in range(1, 4):
+        result = _do_umount([mp_path])
+        logging.debug("umount_unix: normal umount rc=%s out=%s", result.returncode, result.stdout.strip())
+        if result.returncode == 0:
+            break
+        backoff = 0.2 * (2 ** (attempt - 1))
+        logging.debug("umount_unix: retry normal umount %d after %.1fs", attempt + 1, backoff)
+        sleep(backoff)
+
+    # -----------------------------------------------------------------
+    # 2️⃣ if still there, try lazy umount
+    # -----------------------------------------------------------------
+    if result.returncode != 0 and _is_mpoint_mounted(str(mp_resolved)):
+        logging.debug("umount_unix: %s still mounted, trying lazy umount", mp_path)
+        result = _do_umount(["-l", mp_path])
+        logging.debug("umount_unix: lazy umount rc=%s out=%s", result.returncode, result.stdout.strip())
+
+    # -----------------------------------------------------------------
+    # 3️⃣ final verification – poll /proc/mounts a few times
+    # -----------------------------------------------------------------
+    for _ in range(6):
+        if not _is_mpoint_mounted(str(mp_resolved)):
+            break
+        sleep(0.3)
+
+    if _is_mpoint_mounted(str(mp_resolved)):
+        logging.error("umount_unix: %s still present after retries", mp_path)
+    else:
+        logging.debug("umount_unix: %s successfully unmounted", mp_path)
+
+    return result.returncode
+
+import subprocess
+import os
+import glob
+
+def find_tcmalloc():
+
+    """Find the latest libtcmalloc.so using ldconfig and fallback to filesystem search."""
+
+    # Try ldconfig first (more reliable, uses system's dynamic linker cache)
+    try:
+        result = subprocess.run(
+            ['ldconfig', '-p'],
+            capture_output=True, text=True, check=True
+        )
+        lines = [line.strip() for line in result.stdout.splitlines() if 'libtcmalloc.so' in line]
+        if lines:
+            # Parse the line: "libtcmalloc.so.0 (libc6,x86-64) => /path/to/libtcmalloc.so.0.5.0"
+            # The path is usually in the last column after =>
+            # But sometimes (e.g. older glibc) it's just the full path
+            paths = []
+            for line in lines:
+                # Common format: libname (arch) => real_path
+                if '=>' in line:
+                    real_path = line.split('=>')[-1].strip()
+                    paths.append(real_path)
+                else:
+                    # Fallback: last whitespace-separated token
+                    tokens = line.split()
+                    for token in reversed(tokens):
+                        if token.startswith('/') and token.endswith('.so'):
+                            paths.append(token)
+                            break
+            if paths:
+                # Get the latest symlink or file (by mtime or name version)
+                # Often libtcmalloc.so.0 points to libtcmalloc.so.0.5.0
+                # We prefer real files (not symlinks) or follow symlinks
+                real_paths = []
+                for p in paths:
+                    try:
+                        real_p = os.path.realpath(p)
+                        real_paths.append((real_p, os.path.getmtime(real_p)))
+                    except (OSError, FileNotFoundError):
+                        continue
+                if real_paths:
+                    # Sort by mtime descending, return newest
+                    return max(real_paths, key=lambda x: x[1])[0]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass  # ldconfig failed or missing; fall back
+
+    # Fallback: search common library directories
+    search_dirs = [
+        '/usr/lib',
+        '/usr/lib64',
+        '/usr/lib/x86_64-linux-gnu',
+        '/usr/lib/aarch64-linux-gnu',
+        '/usr/local/lib',
+        '/opt/google/lib',
+        '/usr/lib/i386-linux-gnu',
+        '/lib',
+        '/lib64',
+    ]
+
+    # Pattern matches: libtcmalloc.so*, but prefer non-symlinked .so.* files (actual versions)
+    candidates = []
+    for d in search_dirs:
+        if os.path.isdir(d):
+            for pattern in [f"{d}/libtcmalloc*.so*", f"{d}/libtcmalloc*.so"]:
+                for path in glob.glob(pattern):
+                    try:
+                        real_p = os.path.realpath(path)
+                        # Avoid symlinks ending with .so (often just dev symlinks)
+                        if not path.endswith('.so') or not os.path.islink(path):
+                            mtime = os.path.getmtime(real_p)
+                            candidates.append((real_p, mtime))
+                    except OSError:
+                        continue
+
+    if candidates:
+        # Pick the newest versioned library (e.g., .so.0.5.0)
+        return max(candidates, key=lambda x: x[1])[0]
+
+    return None
+
+
+###################################################################################
 
 def Generate_Rid_Dict():
 
@@ -156,24 +449,37 @@ def is_rid_visible_to_os(rid):
     return rid_exists
 
 
+#def is_path_mounted(path):
+#    """
+#    Returns True if the path has been mounted
+#    """
+#
+#    output = SysExecUncached("mount")
+#
+#    is_mounted = False
+#
+#    if isinstance(output, bytes):
+#        output = output.decode("utf-8")
+#
+#    for line in output.splitlines():
+#        if re.search(path, line):
+#            is_mounted = True
+#            break
+#
+#    return is_mounted
+
 def is_path_mounted(path):
     """
-    Returns True if the path has been mounted
+    Return True if *path* appears as a mount point in /proc/mounts.
     """
-
-    output = SysExecUncached("mount")
-
-    is_mounted = False
-
-    if str(type(output)) == "<class 'bytes'>":
-        output = output.decode("utf-8")
-
-    for line in output.splitlines():
-        if re.search(path, line):
-            is_mounted = True
-            break
-
-    return is_mounted
+    path = os.path.abspath(path)
+    with open("/proc/mounts") as f:
+        for line in f:
+            # /proc/mounts format: <dev> <mountpoint> <fs> <options> <dump> <pass>
+            parts = line.split()
+            if len(parts) >= 2 and os.path.abspath(parts[1]) == path:
+                return True
+    return False
 
 
 def is_rid_mounted(rid):
@@ -182,20 +488,6 @@ def is_rid_mounted(rid):
     """
 
     return is_path_mounted("/depot/rid-" + rid + "/data")
-
-#	output = SysExecUncached("mount")
-#
-#	is_mounted = False
-#
-#	if str(type(output)) == "<class 'bytes'>":
-#		output = output.decode("utf-8")
-#
-#	for line in output.splitlines():
-#		if re.search("/depot/rid-" + rid + "/data", line):
-#			is_mounted = True
-#			break
-#
-#	return is_mounted
 
 
 def is_rid_attached_to_ibpserver(rid):
@@ -220,70 +512,127 @@ def is_rid_attached_to_ibpserver(rid):
     return is_attached
 
 
-def mount_unix(device, dir, mount_opts=""):
-    """
-    Mount a given filesystem (if unmounted)
-    """
+#def mount_unix(device, dir, mount_opts = ""):
+#    """
+#    Mount a given filesystem (if unmounted)
+#    """
+#
+#    mounts = SysExecUncached("mount")
+#
+#    for line in mounts.splitlines():
+#        if re.search(device, line):
+#            logging.error("mount_unix:: Mount " + device + " already appears to be mounted!")
+#            return 1
+#
+#    logging.debug("mount_unix:: Mounting " + device + " at mountpoint " + dir)
+#    cmd = "mount " + mount_opts + " " + device + " " + dir
+#    subprocess.call(cmd.split())
 
-    mounts = SysExecUncached("mount")
+#def mount_unix(device, dir, mount_opts=""):
+#    """
+#    Mount a given filesystem (if unmounted)
+#    Returns the exit status (0 == success)
+#    """
+#    # Use /proc/mounts for the pre‑check
+#    if any(device == line.split()[0] for line in open("/proc/mounts")):
+#        logging.error("mount_unix: %s already mounted", device)
+#        return 1
+#
+#    logging.debug("mount_unix: mounting %s on %s (%s)", device, dir, mount_opts)
+#    # Build the command list with shlex (keeps quoting intact)
+#    cmd = ["mount"]
+#    if mount_opts:
+#        cmd.extend(mount_opts.split())
+#    cmd.extend([device, dir])
+#
+#    # Run and capture the return code
+#    result = subprocess.run(cmd, stdout=subprocess.PIPE,
+#                            stderr=subprocess.STDOUT, text=True)
+#
+#    if result.returncode:
+#        logging.error("mount_unix failed: %s", result.stdout.strip())
+#    else:
+#        logging.debug("mount_unix succeeded: %s", result.stdout.strip())
+#
+#    return result.returncode
 
-    for line in mounts.splitlines():
-        if re.search(device, line):
-            logging.error("mount_unix:: Mount " + device +
-                          " already appears to be mounted!")
-            return 1
 
-    logging.debug("mount_unix:: Mounting " + device + " at mountpoint " + dir)
-    cmd = "mount " + mount_opts + " " + device + " " + dir
-    subprocess.call(cmd.split())
-
-
-def umount_unix(filesystem):
-    """
-    Umount a given filesystem (if mounted)
-    """
-
-    if not os.path.isdir(filesystem):
-        logging.error("umount_unix:: Filesystem " + filesystem + " not found.")
-        return 1
-
-    logging.debug("umount_unix:: Unmounting " + filesystem)
-    cmd = "umount " + filesystem
-    subprocess.call(cmd.split())
-
+#def umount_unix(filesystem):
+#    """
+#    Umount a given filesystem (if mounted)
+#    """
+#
+#    if not os.path.isdir(filesystem):
+#        logging.error("umount_unix:: Filesystem " + filesystem + " not found.")
+#        return 1
+#
+#    logging.debug("umount_unix:: Unmounting " + filesystem)
+#    cmd = "umount " + filesystem
+#    subprocess.call(cmd.split())
+#
     # Add a test here:  After umounting, see if the drive is still mounted.  This can
     # happen if the drive is still writing lots of data to disk, or if the disk has failed
     # Wait a couple of seconds (on the assumption that it's writing), and "umount -l" if it doesn't go willingly
 
     # See if the drive is still mounted.  Wait, then check again.  After 30 seconds, assume the drive is faulty and "umount -l"
-    count = 0
-    while count < 10:
-        logging.debug("umount_unix::  DEBUG:  Testing for " + filesystem)
-        if is_path_mounted(filesystem):
-            logging.debug("umount_unix:: " + filesystem +
-                          " is still mounted.   Attempting to wait...")
-            count = count + 1
-            sleep(1)
-        else:
-            break
+#    count = 0
+#    while count < 10:
+#        logging.debug("umount_unix::  DEBUG:  Testing for " + filesystem)
+#        if is_path_mounted(filesystem):
+#            logging.debug("umount_unix:: " + filesystem + " is still mounted.   Attempting to wait...")
+#            count = count + 1
+#            sleep(1)
+#        else:
+#            break
 
-    if is_path_mounted(filesystem):
-        logging.debug("umount_unix:: " + filesystem +
-                      " refuses umount.   Attempting umount -l")
+#    if is_path_mounted(filesystem):
+#        logging.debug("umount_unix:: " + filesystem + " refuses umount.   Attempting umount -l")
+#
+#        cmd = "umount -l " + filesystem
+#        subprocess.call(cmd.split())
+#
+#        sleep(5)
+#        if is_path_mounted(filesystem):
+#            logging.debug("umount_unix::  ERROR!  " + filesystem + " refuses all umount attempts.   Likely failed drive")
 
-        cmd = "umount -l " + filesystem
-        subprocess.call(cmd.split())
+#def umount_unix(mountpoint):
+#    """
+#    Unmount a given mountpoint (if mounted).
+#    Returns the exit status.
+#    """
+#    if not os.path.exists(mountpoint):
+#        logging.error("umount_unix: %s does not exist", mountpoint)
+#        return 1
+#
+#    logging.debug("umount_unix: unmounting %s", mountpoint)
+#
+#    # Normal umount
+#    result = subprocess.run(["umount", mountpoint],
+#                            stdout=subprocess.PIPE,
+#                            stderr=subprocess.STDOUT,
+#                            text=True)
+#
+#    # If it is still present, try lazy umount after a short wait
+#    if result.returncode and is_path_mounted(mountpoint):
+#        logging.debug("umount_unix: %s still mounted, waiting 1s", mountpoint)
+#        sleep(1)
+#
+#        if is_path_mounted(mountpoint):
+#            logging.debug("umount_unix: lazy unmount %s", mountpoint)
+#            result = subprocess.run(["umount", "-l", mountpoint],
+#                                    stdout=subprocess.PIPE,
+#                                    stderr=subprocess.STDOUT,
+#                                    text=True)
+#
+#    # Final verification
+#    if is_path_mounted(mountpoint):
+#        logging.error("umount_unix: %s still present after retries", mountpoint)
+#    else:
+#        logging.debug("umount_unix: %s successfully unmounted", mountpoint)
+#
+#    return result.returncode
 
-        sleep(5)
-        if is_path_mounted(filesystem):
-            logging.debug("umount_unix::  ERRRO!  " + filesystem +
-                          " refuses all umount attempts.   Likely failed drive")
-            # Ok, it's not working, error out
 
-
-########################################################################
-
-# Return the last line of a file
 def LastLine(file):
     f = open(file, "r")
     output = f.readlines()
@@ -420,8 +769,7 @@ def Get_IBP_Server_Version():
     if is_ibp_running:
         for line in SysExec("get_version -a").splitlines():
             if re.search("CMake Build Date:", line):
-                logging.debug(
-                    "Get_IBP_Server_Version:: Getting timestamp from get_version")
+                logging.debug("Get_IBP_Server_Version:: Getting timestamp from get_version")
                 build_date = re.sub("CMake Build Date: ", "", line).strip()
     else:
         string_file = "UNKNOWN"
@@ -443,8 +791,7 @@ def Get_IBP_Server_Version():
             print("ERROR:  Can't find string_file, dying")
             sys.exit(1)
 
-        logging.debug(
-            "Get_IBP_Server_Version:: Getting timestamp from running strings on " + string_file)
+        logging.debug("Get_IBP_Server_Version:: Getting timestamp from running strings on " + string_file)
 
         build_date = "UNKNOWN"
         for line in SysExec("strings " + string_file).splitlines():
@@ -456,8 +803,13 @@ def Get_IBP_Server_Version():
             sys.exit(2)
 
     if build_date != "UNKNOWN":
-        build_timestamp = str(time.mktime(datetime.datetime.strptime(
-            build_date, s_fmt).timetuple())).split(".")[0]
+        try:
+            dt = datetime.datetime.strptime(build_date, s_fmt)
+            build_timestamp = int(dt.timestamp())
+        except ValueError:
+            logging.error(f"Cannot parse build date: {build_date}")
+            build_timestamp = 0
+###        build_timestamp = str(time.mktime(datetime.datetime.strptime(build_date, s_fmt).timetuple())).split(".")[0]
 
     logging.debug("Build date = " + str(build_date) + "|" + str(build_timestamp))
 
@@ -476,35 +828,30 @@ def RID_Mount(Rid):
     rname = depot_dir + "/rid-" + Rid
 
     if os.path.isdir(rname):
-        logging.error("RID_Mount:: Looks like resource " +
-                      Rid + " is already mounted (" + rname + ")!")
+        logging.error("RID_Mount:: Looks like resource " + Rid + " is already mounted (" + rname + ")!")
         sys.exit(2)
 
     Dict_Rid_to_Dev = Generate_Rid_to_Dev_Dict()
 
     if Rid not in Dict_Rid_to_Dev:
-        logging.error("RID_Mount:: Rid " + Rid +
-                      " does not appear to be a valid rid.  Exiting.")
+        logging.error("RID_Mount:: Rid " + Rid + " does not appear to be a valid rid.  Exiting.")
         sys.exit(1)
 
     Sequester_status = RID_Check_Sequester(Rid)
     if RID_Check_Sequester(Rid).split()[0] == "SEQUESTERED":
-        logging.error("RID_Mount:: Rid " + Rid +
-                      " is sequestered and will not be mounted.  Exiting.")
+        logging.error("RID_Mount:: Rid " + Rid + " is sequestered and will not be mounted.  Exiting.")
         sys.exit(1)
 
     Dev = Dict_Rid_to_Dev[Rid]
     md_dev = Dev + "1"
     data_dev = Dev + "2"
 
-    logging.debug("RID_Mount:: md_dev = " + md_dev +
-                  " and data_dev = " + data_dev)
+    logging.debug("RID_Mount:: md_dev = " + md_dev + " and data_dev = " + data_dev)
 
     # Make a temporary mount point so we can mount the first partition
     temp_dir = tempfile.mkdtemp()
     logging.debug("RID_Mount:: temp_dir = " + temp_dir)
-    logging.debug("RID_Mount:: mounting " + md_dev +
-                  " at mountpoint " + temp_dir)
+    logging.debug("RID_Mount:: mounting " + md_dev + " at mountpoint " + temp_dir)
     SysExec("mount " + md_dev + " " + temp_dir)
 
     # See if rid.settings exists with the "rid-" defined
@@ -540,14 +887,11 @@ def RID_Mount(Rid):
     os.rmdir(temp_dir)
 
     if not import_state:
-        print("Mounting resource: " + Rid +
-              "  ---- dev:" + md_dev + ":" + data_dev)
+        print("Mounting resource: " + Rid + "  ---- dev:" + md_dev + ":" + data_dev)
     else:
-        print("Mounting resource: " + Rid + "  ---- dev:" +
-              md_dev + ":" + data_dev + ":" + import_state.strip())
+        print("Mounting resource: " + Rid + "  ---- dev:" + md_dev + ":" + data_dev + ":" + import_state.strip())
 
-    logging.debug("RID_Mount:: Creating folder " + rname +
-                  " and data folder " + rname + "/data")
+    logging.debug("RID_Mount:: Creating folder " + rname + " and data folder " + rname + "/data")
     os.mkdir(rname)
     os.mkdir(rname + "/data")
 
@@ -555,28 +899,35 @@ def RID_Mount(Rid):
 
         logging.debug("RID_Mount:: Taking path 1...")
 
-        logging.debug(
-            "RID_Mount:: Creating metadata mount point at " + rname + "/md")
+        logging.debug("RID_Mount:: Creating metadata mount point at " + rname + "/md")
         os.mkdir(rname + "/md")
 
-        if not is_rid_mounted(rname + "/md"):
-            logging.debug("RID_Mount:: Mounting metadata drive " +
-                          md_dev + " at mountpoint " + rname + "/md")
-            mount_unix(md_dev,   rname + "/md",   mount_opts)
+#        if not is_rid_mounted(rname + "/md"):
+#            logging.debug("RID_Mount:: Mounting metadata drive " + md_dev + " at mountpoint " + rname + "/md")
+#            mount_unix(md_dev,   rname + "/md",   mount_opts)
+#
+#        if not is_rid_mounted(rname + "/data"):
+#            logging.debug("RID_Mount:: Mounting data drive " + data_dev + " at mountpoint " + rname + "/data")
+#            mount_unix(data_dev, rname + "/data", mount_opts)
 
-        if not is_rid_mounted(rname + "/data"):
-            logging.debug("RID_Mount:: Mounting data drive " +
-                          data_dev + " at mountpoint " + rname + "/data")
-            mount_unix(data_dev, rname + "/data", mount_opts)
+        if not is_path_mounted(rname + "/md"):
+            logging.debug("RID_Mount: mounting metadata %s → %s", md_dev, rname + "/md")
+            rc = mount_unix(md_dev, rname + "/md", mount_opts)
+            if rc:
+                sys.exit(3)
+
+        if not is_path_mounted(rname + "/data"):
+            logging.debug("RID_Mount: mounting data %s → %s", data_dev, rname + "/data")
+            rc = mount_unix(data_dev, rname + "/data", mount_opts)
+            if rc:
+                sys.exit(3)
 
         is_metadata = os.path.ismount(rname + "/md")
         is_data = os.path.ismount(rname + "/data")
-        logging.debug("is_metadata = " + str(is_metadata) +
-                      " and is_data = " + str(is_data))
+        logging.debug("is_metadata = " + str(is_metadata) + " and is_data = " + str(is_data))
 
         if not is_metadata or not is_data:
-            logging.error(
-                "RID_Mount:: Failed mounting partitions!  Attempting to unwind and exit...")
+            logging.error("RID_Mount:: Failed mounting partitions!  Attempting to unwind and exit...")
             umount_unix(rname + "/md")
             umount_unix(rname + "/data")
             os.rmdir(rname + "/md")
@@ -587,14 +938,12 @@ def RID_Mount(Rid):
 
         mount_unix(data_dev, rname + "/data", mount_opts)
 
-        logging.debug("RID_Mount:: Creating symlink between " +
-                      import_state + " and " + rname + "/md")
+        logging.debug("RID_Mount:: Creating symlink between " + import_state + " and " + rname + "/md")
         os.symlink(import_state, rname + "/md")
 
         if not os.path.ismount(rname + "/data") and not os.path.islink(rname + "/md"):
-            logging.error(
-                "RID_Mount:: Failed mounting partitions!  Attempting to unwind and exit...")
-            os.ulink(rname + "/md")
+            logging.error("RID_Mount:: Failed mounting partitions!  Attempting to unwind and exit...")
+            os.unlink(rname + "/md")
             umount_unix(rname + "/data")
             os.rmdir(rname + "/data")
             os.rmdir(rname)
@@ -603,8 +952,7 @@ def RID_Mount(Rid):
         import_state = ":" + import_state
 
     output_file = rname + "/rid.info"
-    logging.debug("RID_Mount:: Saving info to " +
-                  output_file + " and then exiting")
+    logging.debug("RID_Mount:: Saving info to " + output_file + " and then exiting")
     f = open(output_file, "w")
     f.write("dev:" + md_dev + ":" + data_dev + import_state + "\n")
     f.close()
@@ -624,17 +972,14 @@ def RID_Umount(Rid):
 
     # If the rid doesn't appear to be mounted, fail.
     if not os.path.isdir(rname):
-        logging.info("RID_Umount:: Rid " + Rid +
-                     " does not appear to be mounted.  No rid directory " + rname + " exists.")
+        logging.info("RID_Umount:: Rid " + Rid + " does not appear to be mounted.  No rid directory " + rname + " exists.")
         sys.exit(1)
 
     if not os.path.isfile(rinfo):
-        logging.info("RID_Umount:: Rid " + Rid +
-                     " does not appear to be mounted.  No rid.info file at " + rname + ".")
+        logging.info("RID_Umount:: Rid " + Rid + " does not appear to be mounted.  No rid.info file at " + rname + ".")
         sys.exit(1)
 
     # See if lsof sees any files on this rid being used.   If so, fail.
-
     lsof_md = ""
     lsof_data = ""
 
@@ -645,8 +990,7 @@ def RID_Umount(Rid):
         lsof_data = SysExec("lsof /depot/rid-" + str(Rid) + "/data")
 
     if len(lsof_md) > 0 or len(lsof_data) > 0:
-        logging.error(
-            "RID_Umount:: Can't umount RID.  Appears to be in use according to 'lsof'!")
+        logging.error("RID_Umount:: Can't umount RID.  Appears to be in use according to 'lsof'!")
         sys.exit(1)
 
     RInfo = SysExec("cat " + rinfo).strip()
@@ -661,56 +1005,46 @@ def RID_Umount(Rid):
     if len(RInfo) == 4:
         import_type = RInfo.split(":")[3]
 
-    logging.debug("RID_Umount:: import_type = " +
-                  import_type + " and RInfo = " + RInfo)
+    logging.debug("RID_Umount:: import_type = " + import_type + " and RInfo = " + RInfo)
 
     print("Umounting rid " + Rid)
 
     if dtype != "dev" and dtype != "dir":
-        logging.error(
-            "RID_Umount:: Missing or unknown device type(" + dtype + ")!")
+        logging.error("RID_Umount:: Missing or unknown device type(" + dtype + ")!")
         sys.exit(2)
 
     if dtype == "dev":
 
         logging.debug("RID_Umount:: Running the 'dev' path...")
 
-        logging.debug(
-            "RID_Umount:: Umounting data partition at mountpoint" + rname + "/data")
+        logging.debug("RID_Umount:: Umounting data partition at mountpoint" + rname + "/data")
         umount_unix(rname + "/data")
         if not is_rid_mounted(rname + "/data"):
-            logging.debug("RID_Umount:: " + rname +
-                          "/data was successfully umounted")
+            logging.debug("RID_Umount:: " + rname + "/data was successfully umounted")
         else:
             logging.debug("RID_Umount:: " + rname + "/data was not umounted!!")
 
         if os.path.isdir(rname + "/data"):
-            logging.debug(
-                "RID_Umount:: Erasing old data mount point " + rname + "/data")
+            logging.debug("RID_Umount:: Erasing old data mount point " + rname + "/data")
             os.rmdir(rname + "/data")
 
         if not import_type:
 
             logging.debug("RID_Umount:: No import_type found")
 
-            logging.debug(
-                "RID_Umount:: Umounting metadata partition at mountpoint " + rname + "/md")
+            logging.debug("RID_Umount:: Umounting metadata partition at mountpoint " + rname + "/md")
             umount_unix(rname + "/md")
             if not is_rid_mounted(rname + "/md"):
-                logging.debug("RID_Umount:: " + rname +
-                              "/md was successfully umounted")
+                logging.debug("RID_Umount:: " + rname + "/md was successfully umounted")
             else:
-                logging.debug("RID_Umount:: " + rname +
-                              "/md was not umounted!!")
+                logging.debug("RID_Umount:: " + rname + "/md was not umounted!!")
 
             if os.path.islink(rname + "/md"):
-                logging.debug(
-                    "RID_Umount:: Erasing old metadata symlink at " + rname + "/md")
+                logging.debug("RID_Umount:: Erasing old metadata symlink at " + rname + "/md")
                 os.remove(rname + "/md")
 
             if os.path.isdir(rname + "/md"):
-                logging.debug(
-                    "RID_Umount:: Erasing old metadata mount point at " + rname + "/md")
+                logging.debug("RID_Umount:: Erasing old metadata mount point at " + rname + "/md")
                 os.rmdir(rname + "/md")
         else:
             logging.debug("RID_Umount:: Removing " + rname + "/md")
@@ -745,14 +1079,15 @@ def RID_Sequester(Rid, Msg):
     Metadata_Location = LocateMetadata(Rid)
 
     if re.search("^UNKNOWN", Metadata_Location):
-        logging.error(
-            "RID_Sequester:: Path to Rid metadata cannot be determined.  Exiting.")
+        logging.error("RID_Sequester:: Path to Rid metadata cannot be determined.  Exiting.")
         sys.exit(1)
 
     if re.search("^PATH", Metadata_Location):
         Metadata_Path = Metadata_Location.split(":")[1]
 
     if re.search("^BLOCKDEV", Metadata_Location):
+        Rid_to_Dev = Generate_Rid_to_Dev_Dict()
+        Dev = Rid_to_Dev[Rid]
         Metadata_Path = tempfile.mkdtemp()
         mount_unix(Dev + "1", Metadata_Path)
         Unmount_Later = 1
@@ -798,14 +1133,15 @@ def RID_Unsequester(Rid, Msg):
     Metadata_Location = LocateMetadata(Rid)
 
     if re.search("^UNKNOWN", Metadata_Location):
-        logging.error(
-            "RID_Unsequester:: Path to Rid metadata cannot be determined.  Exiting.")
+        logging.error("RID_Unsequester:: Path to Rid metadata cannot be determined.  Exiting.")
         sys.exit(1)
 
     if re.search("^PATH", Metadata_Location):
         Metadata_Path = Metadata_Location.split(":")[1]
 
     if re.search("^BLOCKDEV", Metadata_Location):
+        Rid_to_Dev = Generate_Rid_to_Dev_Dict()
+        Dev = Rid_to_Dev[Rid]
         Metadata_Path = tempfile.mkdtemp()
         mount_unix(Dev + "1", Metadata_Path)
         Unmount_Later = 1
@@ -857,14 +1193,12 @@ def IBP_Server_Status():
 
 def IBP_Server_Start():
 
-    # If I'm running under pychecker (or another debugger), remove it from sys.argv
-    # so it will work as normal below.
+    # Remove pychecker from sys.argv if present
     for i in sys.argv:
         if re.search("pychecker", i):
             sys.argv.remove(i)
 
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
-    #logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
     # We want a random number so we can spawn a copy of ibp_server with a random filename
     ibp_server_exe = "/tmp/ibp_server." + str(random.randint(0, 32767))
@@ -881,17 +1215,33 @@ def IBP_Server_Start():
     if not pid and not name:
         logging.info("ibp_server is not running")
     else:
-        logging.info("Sending SIGQUIT to name " +
-                     name + " and pid " + str(pid))
-        os.kill(pid, signal.SIGQUIT)
+        logging.info("Sending SIGQUIT to name " + name + " and pid " + str(pid))
+        try:
+            os.kill(pid, signal.SIGQUIT)
+        except OSError:
+            pass  # Process may have exited already
 
-        while check_pid(pid):
-            time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+        # Wait for shutdown — *handle zombies* and add timeout
+        wait_timer = 0
+        max_wait = 120
+        while wait_timer < max_wait and check_pid(pid):
+            # Skip zombies (status == 'Z' / 'defunct')
+            try:
+                p = psutil.Process(pid)
+                if p.status() == psutil.STATUS_ZOMBIE:
+                    logging.info("Process is zombie; skipping wait")
+                    break
+            except psutil.NoSuchProcess:
+                break
+            time_str = strftime("%Y-%m-%d %H:%M:%S", gmtime())
             pid_status = SysExecUncached("ps u -p " + str(pid))
-            logging.info(
-                "Waiting for ibp_server shutdown to complete...  " + time)
+            logging.info("Waiting for ibp_server shutdown to complete...  " + time_str)
             logging.info(str(pid_status))
             sleep(1)
+            wait_timer += 1
+
+        if check_pid(pid):
+            logging.warning("SIGQUIT did not stop ibp_server within " + str(max_wait) + "s; giving up")
 
         print("Completed shutdown.")
 
@@ -903,7 +1253,6 @@ def IBP_Server_Start():
     exe = which("ibp_server.exe")
     if not exe:
         exe = which("ibp_server")
-
     if not exe:
         logging.error("Can't locate ibp_server.exe in the PATH!  Aborting!")
         sys.exit(1)
@@ -927,19 +1276,14 @@ def IBP_Server_Start():
     nres_list = []
 
     if os.path.isfile(cfg):
-
-        f = open(cfg, 'r')
-
-        for line in f.read().splitlines():
-
-            if re.search("threads", line):
-                logging.debug("nthreads line from cfg = " + line)
-                nthreads = line.split("=")
-                nthreads = nthreads[1].strip()
-
-            if re.search("^\\[resource ", line) and line not in nres_list:
-                nres += 1
-                nres_list.append(line)
+        with open(cfg, 'r') as f:
+            for line in f.read().splitlines():
+                if re.search("threads", line):
+                    logging.debug("nthreads line from cfg = " + line)
+                    nthreads = line.split("=")[1].strip()
+                if re.search(r"^\[resource ", line) and line not in nres_list:
+                    nres += 1
+                    nres_list.append(line)
         f.close()
 
     nfd = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -949,107 +1293,99 @@ def IBP_Server_Start():
 
     # nfs/minfd need to be a tuple of (soft_limit, hard_limit).  Then figure out how to do arithmetic on them...
     if nfd < minfd:
-        logging.info("** Adjusting max fd to correspond with " + cfg +
-                     ".  threads=" + str(nthreads) + " resources=" + str(nres))
-        logging.info("** Current max fd is " + str(nfd) + " changing to " +
-                     str(minfd) + " (ulimit -n " + str(minfd) + ")")
+        logging.info("** Adjusting max fd to correspond with " + cfg + ".  threads=" + str(nthreads) + " resources=" + str(nres))
+        logging.info("** Current max fd is " + str(nfd) + " changing to " + str(minfd) + " (ulimit -n " + str(minfd) + ")")
 
         resource.setrlimit(resource.RLIMIT_NOFILE, (minfd, minfd))
         newfd = resource.getrlimit(resource.RLIMIT_NOFILE)
 
         if newfd != (minfd, minfd):
-            logging.info("newfd = " + str(newfd) +
-                         " and minfd = " + str(minfd))
-            logging.error(
-                "Can't make fd limit large enough!  Exiting without launching ibp_server!")
-            logging.error(
-                "Please lower the number of threads or increase the system wide max fd.")
+            logging.info("newfd = " + str(newfd) + " and minfd = " + str(minfd))
+            logging.error("Can't make fd limit large enough!  Exiting without launching ibp_server!")
+            logging.error("Please lower the number of threads or increase the system wide max fd.")
             sys.exit(1)
 
-    cmd = "LD_PRELOAD=\"/usr/local/lib/libtcmalloc.so\" " + \
-        ibp_server_exe + " " + " ".join(sys.argv[1:])
+    tcmalloc_path = find_tcmalloc()
+    if tcmalloc_path:
+        logging.info(f"Found tcmalloc: {tcmalloc_path}")
+        tcmalloc_dir  = os.path.dirname(tcmalloc_path)
+        preload_tc = "LD_PRELOAD=\"" + str(tcmalloc_path) + "\" "
+    else:
+        logging.info("tcmalloc not found.")
+        tcmalloc_path = ""
+        tcmalloc_dir = ""
+        preload_tc = ""
+
+    cmd = preload_tc + ibp_server_exe + " " + " ".join(sys.argv[1:])
     logging.info("Attempting to run command: " + cmd)
 
-    args = [ibp_server_exe]
-    args.extend(sys.argv[1:])
+    args = [ibp_server_exe] + sys.argv[1:]
 
-    env = {}
-    env["LD_LIBRARY_PATH"] = "/usr/local/lib"
-    env["LD_PRELOAD"] = "/usr/local/lib/libtcmalloc.so"
+    env = {
+        "LD_LIBRARY_PATH": str(tcmalloc_dir),
+        "LD_PRELOAD":      str(tcmalloc_path)
+    }
 
     subprocess.Popen(args=args, env=env)
 
 
 def IBP_Server_Stop():
-
-    # Rewritten to handle an edge case where there are defunct ibp_server processes.  Running
-    # SIGKILL on them will just cause an infinite loop.   Instead, only SIGKILL running
-    # processes.  This often happens when removing a drive.   This is a (hopefully) temporary
-    # method until Alan can implement a SIGCHLD handler in ibp_server
-    pid_arr = { p.pid: p.info for p in psutil.process_iter(['name', 'create_time']) }
-    new_pid_arr = {}
-    pid_order = {}
-
-    for pid in pid_arr:
-
-        if re.search("ibp_server.", pid_arr[pid]["name"]):
-
-            proc = psutil.Process(pid)
-            if proc.status() == psutil.STATUS_ZOMBIE:
-                continue
-
-            if not pid in new_pid_arr:
-                new_pid_arr[pid] = {}
-                pid_order[pid] = {}
-
-            new_pid_arr[pid]["name"]        = pid_arr[pid]["name"]
-            new_pid_arr[pid]["create_time"] = pid_arr[pid]["create_time"]
-
-    pid_arr = new_pid_arr
-    print("DEBUG:  pid_arr = " + str(pid_arr))
+    pid_arr = {}
+    for p in psutil.process_iter(['name']):
+        try:
+            if re.search("ibp_server.", p.name()):
+                pid_arr[p.pid] = p
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
 
     if not pid_arr:
-        print("INFO:  ibp_server is not running")
-        sys.exit()
+        logging.info("ibp_server is not running")
+        return
 
-    # We want to kill the processes oldest to newest
-#    pid_order = dict(sorted(pid_order.items(), key=lambda item: item[1]))
-#    print("DEBUG:  pid_order = " + str(pid_order))
+    logging.info("Found ibp_server processes: " + str(list(pid_arr.keys())))
 
-    for pid in pid_arr:
-#    for pid in pid_order:
+    # Kill oldest-first (by pid, as proxy for age)
+    for pid in sorted(pid_arr.keys()):
+        proc = psutil.Process(pid)
+        try:
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                logging.info("Skipping zombie PID " + str(pid))
+                continue
+            logging.info("Sending SIGQUIT to name " + proc.name() + " and pid " + str(pid))
+            proc.send_signal(signal.SIGQUIT)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
 
-        # Try SIGQUIT then quit after 120 seconds if it doesn't succeed.
+        # Wait for shutdown (same as IBP_Server_Start)
         sig_try_time = 120
-
-        print("INFO:  Sending SIGQUIT to name " + pid_arr[pid]["name"] + " and pid " + str(pid))
-        if psutil.pid_exists(pid):
-                os.kill(pid, signal.SIGQUIT)
-
         wait_timer = 0
-        while wait_timer <= sig_try_time:
+        while wait_timer < sig_try_time:
+            try:
                 if not check_pid(pid):
-                        break
-                time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-                pid_status = subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
-                print("Waiting for " + pid_arr[pid]["name"] + " SIGQUIT shutdown to complete...  " + time)
-                print(pid_status)
-                sleep(1)
-                wait_timer = wait_timer + 1
+                    break
+                # Check for zombie
+                if proc.status() == psutil.STATUS_ZOMBIE:
+                    logging.info("Process became zombie; stopping wait")
+                    break
+            except psutil.NoSuchProcess:
+                break
 
-        if psutil.pid_exists(pid):
-            print("ERROR:  SIGQUIT failed to stop " + pid_arr[pid]["name"] + "on pid " + str(pid))
-            sys.exit()
-#           os.kill(pid, signal.SIGKILL)
+            time_str = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+            pid_status = SysExecUncached("ps u -p " + str(pid))
+            logging.info("Waiting for " + proc.name() + " SIGQUIT shutdown to complete...  " + time_str)
+            logging.info(str(pid_status))
+            sleep(1)
+            wait_timer += 1
 
-#        while check_pid(pid):
-#                time = strftime("%Y-%m-%d %H:%M:%S", gmtime())
-#                pid_status = subprocess.Popen(['ps', 'u', '-p', str(pid)], stdout=subprocess.PIPE).communicate()[0]
-#                print("Waiting for " + pid_arr[pid]["name"] + " SIGKILL shutdown to complete...  " + time)
-#                print(pid_status)
-#                sleep(1)
+        if check_pid(pid):
+            logging.error("SIGQUIT failed to stop PID " + str(pid))
+            # Optional: send SIGKILL here if needed
+            try:
+                proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
 
-    print("Completed shutdown.")
+    logging.info("Completed shutdown.")
 
 
 def RID_List(arguments=""):
@@ -1081,10 +1417,9 @@ def RID_List(arguments=""):
         sequester_status = "NOT_SEQUESTERED"
         if os.path.isdir(depot_dir + "/import/md-" + str(rid)):
             if os.path.isfile(depot_dir + "/import/md-" + str(rid) + "/SEQUESTER_STATUS"):
-                f = open(depot_dir + "/import/md-" +
-                         str(rid) + "/SEQUESTER_STATUS")
+                f = open(depot_dir + "/import/md-" + str(rid) + "/SEQUESTER_STATUS")
                 sequester_status = f.readlines()[-1].strip()
-                f.close
+                f.close()
 
         mount_type = "UNKNOWN"
         data_dev = "UNKNOWN"
@@ -1106,8 +1441,8 @@ def RID_List(arguments=""):
         elif arguments == "-rid-only":
             print(rid)
         else:
-            print(FORMAT % (rid.rjust(2), mount_type.rjust(2), data_dev.rjust(
-                2), metadata_dev.rjust(2), import_status.rjust(2), sequester_status))
+            print(FORMAT % (rid.rjust(2), mount_type.rjust(2), data_dev.rjust(2),
+                           metadata_dev.rjust(2), import_status.rjust(2), sequester_status))
 
 
 def RID_Merge_Config():
@@ -1159,12 +1494,10 @@ def RID_Check_Sequester(Rid):
 
     Metadata_Location = LocateMetadata(Rid)
 
-    logging.debug(
-        "RID_Check_Sequester::  Metadata_Location = " + Metadata_Location)
+    logging.debug("RID_Check_Sequester::  Metadata_Location = " + Metadata_Location)
 
     if re.search("^UNKNOWN", Metadata_Location):
-        logging.error(
-            "RID_Check_Sequester:: Path to Rid metadata cannot be determined.  Exiting.")
+        logging.error("RID_Check_Sequester:: Path to Rid metadata cannot be determined.  Exiting.")
         sys.exit(1)
 
     if re.search("^PATH", Metadata_Location):
@@ -1172,20 +1505,17 @@ def RID_Check_Sequester(Rid):
 
     if re.search("^BLOCKDEV", Metadata_Location):
         MD_Partition = Metadata_Location.split(":")[1] + "1"
-        logging.debug(
-            "RID_Check_Sequester:: Metadata Partition = " + MD_Partition)
+        logging.debug("RID_Check_Sequester:: Metadata Partition = " + MD_Partition)
 
         Dict_Rid_To_Dev = Generate_Rid_to_Dev_Dict()
         Dev = Dict_Rid_To_Dev[Rid]
 
         if not is_partition_mounted(MD_Partition):
-            logging.debug(
-                "RID_Check_Sequester:: Metadata partition is unmounted.  Mounting to check import...")
+            logging.debug("RID_Check_Sequester:: Metadata partition is unmounted.  Mounting to check import...")
             Metadata_Path = tempfile.mkdtemp()
             mount_unix(Dev + "1", Metadata_Path)
         else:
-            logging.debug(
-                "RID_Check_Sequester:: Metadata partition is mounted.  Checking import and then leaving mounted.")
+            logging.debug("RID_Check_Sequester:: Metadata partition is mounted.  Checking import and then leaving mounted.")
             mounts = SysExecUncached("mount")
             for line in mounts.splitlines():
                 if re.search(MD_Partition + " ", line):
@@ -1268,19 +1598,11 @@ def partition_exists(path):
 
 def is_partition_mounted(partition):
     """
-
     Returns True if the partition has been mounted
     """
-
-    output = SysExec("mount")
-
-    is_mounted = False
-    for line in output.splitlines():
-        if re.search(partition, line):
-            is_mounted = True
-            break
-
-    return is_mounted
+    with open("/proc/mounts") as f:
+        return any(partition == line.split()[0] for line in f)
+#    return any(partition in line for line in SysExec("mount").splitlines())
 
 
 def RID_Fsck(Rid):
@@ -1305,13 +1627,10 @@ def RID_Fsck(Rid):
     for part in Partitions:
 
         if is_partition_mounted(part):
-
-            logging.debug("RID_Fsck::  Partition " + part +
-                          " is mounted, skipping fsck...")
+            logging.debug("RID_Fsck::  Partition " + part + " is mounted, skipping fsck...")
             continue
 
-        logging.debug("RID_Fsck::  Partition " + part +
-                      " is unmounted, commensing fsck...")
+        logging.debug("RID_Fsck::  Partition " + part + " is unmounted, commensing fsck...")
 
         SysExec("fsck -y " + part)
 
@@ -1319,8 +1638,7 @@ def RID_Fsck(Rid):
 def RID_Defrag(Rid, LogDir, Extent_Threshold=3):
 
     if not os.path.isdir(LogDir):
-        logging.debug("RID_Defrag:: LogDir " + LogDir +
-                      " doesn't exist, so creating...")
+        logging.debug("RID_Defrag:: LogDir " + LogDir + " doesn't exist, so creating...")
         os.mkdir(LogDir)
 
     # Create an array of "valid" characters so I can filter out bad ones
@@ -1341,8 +1659,7 @@ def RID_Defrag(Rid, LogDir, Extent_Threshold=3):
     # I should add a bit of code to detect where the RID Data partition is mounted
     # but until then...
     if not os.path.isdir("/depot/rid-" + Rid):
-        logging.error("RID_Defrag:: ERROR: RID " + Rid +
-                      " either doesn't exist or isn't mounted properly.  Please check.")
+        logging.error("RID_Defrag:: ERROR: RID " + Rid + " either doesn't exist or isn't mounted properly.  Please check.")
         sys.exit(1)
 
     Logfile = LogDir + "/extents-rid-" + Rid + ".log"
@@ -1378,8 +1695,7 @@ def RID_Defrag(Rid, LogDir, Extent_Threshold=3):
 
                 # Filter out the nasty non-numeric characters and then
                 # pluck out the "after" extents
-                Extents_After = "".join(
-                    [c for c in Extents_After if c in ValidChars])
+                Extents_After = "".join([c for c in Extents_After if c in ValidChars])
                 Extents_After = Extents_After[::-1]
                 Extents_After = Extents_After.split("-")[0]
                 Extents_After = Extents_After[::-1]
@@ -1405,7 +1721,6 @@ def RID_Defrag(Rid, LogDir, Extent_Threshold=3):
 def Smart_Attributes(Dev):
 
     # If Dev doesn't exist, bail out now...
-
     f = open("/sys/block/" + Dev.split("/")[-1] + "/device/model")
     Model = f.read().strip()
     f.close()
@@ -1439,14 +1754,12 @@ def Smart_Attributes(Dev):
             if re.search("Current Drive Temperature", line):
                 t = line.split(":")[1]
                 t = re.sub("C", "", t).strip()
-                Drive_Attributes[194] = "194_Temperature_Celsius " + \
-                    t + " " + t + " 0 " + t
+                Drive_Attributes[194] = "194_Temperature_Celsius " + t + " " + t + " 0 " + t
 
             # Others we'll create unique SAS attributes for
             if re.search("^Elements in grown defect list", line):
                 t = line.split(":")[1].strip()
-                Drive_Attributes[9000] = "9000_SAS_Grown_Defect_List " + \
-                    t + " 0 0 " + t
+                Drive_Attributes[9000] = "9000_SAS_Grown_Defect_List " + t + " 0 0 " + t
 
             if re.search("^Manufactured in", line):
                 t = re.sub("Manufactured in ", "", line)
@@ -1457,14 +1770,12 @@ def Smart_Attributes(Dev):
             if re.search("^read:", line):
                 t = ' '.join(line.split())
                 t = t.split(" ")[6].split(".")[0]
-                Drive_Attributes[9002] = "9002_SAS_Gigabytes_Read " + \
-                    t + " 0 0 " + t
+                Drive_Attributes[9002] = "9002_SAS_Gigabytes_Read " + t + " 0 0 " + t
 
             if re.search("^write:", line):
                 t = ' '.join(line.split())
                 t = t.split(" ")[6].split(".")[0]
-                Drive_Attributes[9003] = "9003_SAS_Gigabytes_Write " + \
-                    t + " 0 0 " + t
+                Drive_Attributes[9003] = "9003_SAS_Gigabytes_Write " + t + " 0 0 " + t
 
     else:
 
@@ -1602,12 +1913,10 @@ def Print_Query_Drives_Smart_Attributes(Output_Dict):
         len_raw = max(len(val[5]), len_raw)
 
     FORMAT = "%-" + str(len_dev+pad_len) + "s %-" + str(len_attr+pad_len) + "s %-" + str(len_value+pad_len) + \
-        "s %-" + str(len_worst+pad_len) + "s %-" + str(len_thresh +
-                                                       pad_len) + "s %-" + str(len_raw+pad_len) + "s"
+        "s %-" + str(len_worst+pad_len) + "s %-" + str(len_thresh + pad_len) + "s %-" + str(len_raw+pad_len) + "s"
 
     # The 6 is pulled from thin air, but works...
-    Length = len_dev + len_attr + len_value + \
-        len_worst + len_thresh + len_raw + 5*pad_len + 6
+    Length = len_dev + len_attr + len_value + len_worst + len_thresh + len_raw + 5*pad_len + 6
 
     print(FORMAT % ("Device", "Attr", "Value", "Worst", "Thresh", "Raw"))
     print("=" * Length)
@@ -1644,8 +1953,7 @@ def RID_Run_SmartTest(Rid, TestType="short"):
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s')
 
     if TestType != "short" and TestType != "long":
-        print("ERROR:  You requested a " + TestType +
-              " SMART test which isn't supported.")
+        print("ERROR:  You requested a " + TestType + " SMART test which isn't supported.")
         sys.exit(1)
 
     # Just promote it to a string here...
@@ -1691,7 +1999,10 @@ def HumanFriendlyBytes(bytes, scale, decimals):
     if not scale in AcceptableScales:
         return "ERROR"
 
-    unit_i = int(math.floor(math.log(bytes, scale)))
+    if bytes == 0:
+        unit_i = 0
+    else:
+        unit_i = int(math.floor(math.log(bytes, scale)))
 
     if scale == 1000:
         UNITS = ["B",  "KB",  "MB",  "GB",  "TB",  "PB",  "EB",  "ZB",  "YB"]
@@ -1704,9 +2015,9 @@ def HumanFriendlyBytes(bytes, scale, decimals):
     return str(scaled_size) + " " + scaled_units
 
 
-def query_yes_no(question, default="no"):
+def query_yes_no(question, default = "no"):
     """
-    Ask a yes/no question via raw_input() and return their answer.
+    Ask a yes/no question via input() and return their answer.
     The return value is True for "yes" or False for "no".
     """
 
@@ -1723,19 +2034,20 @@ def query_yes_no(question, default="no"):
 
     while True:
         sys.stdout.write(question + prompt)
-        choice = raw_input().lower()
+        choice = input().lower()
         if default is not None and choice == '':
             return valid[default]
         elif choice in valid:
             return valid[choice]
         else:
-            sys.stdout.write(
-                "Please respond with 'yes' or 'no' (or 'y' or 'n').\n")
+            sys.stdout.write("Please respond with 'yes' or 'no' (or 'y' or 'n').\n")
 
 
 def Parted_Return_Next_Available_Sector(Dev):
 
     PartedFilter = ["Model", "Disk", "Sector", "Partition", "Number"]
+
+    val = None
 
     for line in SysExec("parted " + Dev + " unit s p free").splitlines():
 
@@ -1757,19 +2069,17 @@ def Parted_Return_Next_Available_Sector(Dev):
 def RID_Create(Rid, Dev, AssumeYes=False):
 
     if not partition_exists(Dev):
-        logging.error(
-            "RID_Create:: ERROR:  Could not find block device " + Dev + ".  Exiting...")
+        logging.error("RID_Create:: ERROR:  Could not find block device " + Dev + ".  Exiting...")
         return 1
 
     Rname = depot_dir + "/rid-" + Rid
 
-    if os.path.isfile(Rname):
+    if os.path.isdir(Rname):
         print("ERROR:  Looks like a resource is already mounted using RID " + Rid + "!")
         return 1
 
     # See if there are any partitions on the drive
-    logging.info(
-        "RID_Create:: Seeing if any existing partitions on drive " + Dev)
+    logging.info("RID_Create:: Seeing if any existing partitions on drive " + Dev)
     Parts = []
 
     PartedFilter = ["Model", "Disk", "Sector", "Partition",
@@ -1792,8 +2102,7 @@ def RID_Create(Rid, Dev, AssumeYes=False):
         Parts.append(val)
 
     if Parts:
-        logging.info(
-            "RID_Create:: Found the following existing partitions: " + str(Parts))
+        logging.info("RID_Create:: Found the following existing partitions: " + str(Parts))
     else:
         logging.info("RID_Create:: No existing partitions found.")
 
@@ -1813,16 +2122,14 @@ def RID_Create(Rid, Dev, AssumeYes=False):
     for line in SysExec("mount").splitlines():
         if re.search("^" + Dev + "[0-9]", line):
             part = line.split()[0]
-            logging.info("RID_Create:: Detected mounted partition " +
-                         part + ".  Attempting to umount...")
+            logging.info("RID_Create:: Detected mounted partition " + part + ".  Attempting to umount...")
             SysExec("umount -f " + part)
 
     # Since we are creating the filesystem, we need to erase any partitions already
     # on this drive
     if Parts:
         for part in Parts:
-            logging.info("RID_Create:: Clearing old partition " +
-                         part + " from drive " + Dev)
+            logging.info("RID_Create:: Clearing old partition " + part + " from drive " + Dev)
             cmd = "parted -s " + Dev + " rm " + part
             subprocess.call(cmd.split())
 
@@ -1838,8 +2145,7 @@ def RID_Create(Rid, Dev, AssumeYes=False):
 
     # ...and then allocate the rest of the space to data
     ns = Parted_Return_Next_Available_Sector(Dev)
-    logging.info(
-        "RID_Create:: Allocating all remaining disk space to the data partition...")
+    logging.info("RID_Create:: Allocating all remaining disk space to the data partition...")
     cmd = "parted -s " + Dev + " mkpart primary " + ns + " 100%"
     subprocess.call(cmd.split())
 
@@ -1848,14 +2154,12 @@ def RID_Create(Rid, Dev, AssumeYes=False):
 
     # Format the partitions
     logging.info("RID_Create:: Formatting metadata partition...")
-    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-md-" + \
-        Rid + " " + Dev + "1"
+    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-md-" + Rid + " " + Dev + "1"
     logging.info("cmd = " + cmd)
     subprocess.call(cmd.split())
 
     logging.info("RID_Create:: Formatting data partition...")
-    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-data-" + \
-        Rid + " " + Dev + "2"
+    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-data-" + Rid + " " + Dev + "2"
     logging.info("cmd = " + cmd)
     subprocess.call(cmd.split())
 
@@ -1911,11 +2215,28 @@ def RID_Create(Rid, Dev, AssumeYes=False):
         f.write("dev:" + Dev + "1:" + Dev + "2\n")
     f.close()
 
-    logging.info("RID_Create:: Configuration stored in " +
-                 Rname + "/md/rid.settings")
+    logging.info("RID_Create:: Configuration stored in " + Rname + "/md/rid.settings")
 
 
-def RID_Import(Rid, MD_Dir, Snap=False):
+def copyfolder(src, dst, symlinks=False, ignore=None):
+    logging.debug("copyfolder:: src = " + src + " and dst = " + dst)
+    if not os.path.exists(dst):
+        logging.debug("copyfolder:: creating directory " + dst)
+        os.makedirs(dst)
+    for item in os.listdir(src):
+        logging.debug("copyfolder:: iterating over src " + item)
+        s = os.path.join(src, item)
+        d = os.path.join(dst, item)
+        if os.path.isdir(s):
+            logging.debug("copyfolder:: calling shutil.copytree to copy " + s + " to  " + d)
+            shutil.copytree(s, d, symlinks, ignore)
+        else:
+            if not os.path.exists(d) or os.stat(s).st_mtime - os.stat(d).st_mtime > 1:
+                logging.debug("copyfolder:: calling shutil.copy2 to copy " + s + " to  " + d)
+                shutil.copy2(s, d)
+
+
+def RID_Import(Rid, MD_Dir, Snap = False):
 
     # Get the version of IBP server
     IBP_Server_Ver = int(Get_IBP_Server_Version().split("|")[1])
@@ -1946,8 +2267,7 @@ def RID_Import(Rid, MD_Dir, Snap=False):
     logging.debug("RID_Import:: Rid_Folder = " + Rid_Folder)
 
     if os.path.isfile(Rid_Folder + "/md/import"):
-        logging.info("ERROR:  It appears that Rid " +
-                     Rid + " is already imported.")
+        logging.info("ERROR:  It appears that Rid " + Rid + " is already imported.")
         sys.exit(1)
 
     Rid_Info = Rid_Folder + "/rid.info"
@@ -1965,8 +2285,7 @@ def RID_Import(Rid, MD_Dir, Snap=False):
 
     lsof_rid = SysExec("lsof " + Rid_Folder)
     if len(lsof_rid) > 0:
-        logging.error(
-            "RID_Import:: Can't umount RID.  Appears to be in use according to 'lsof'!")
+        logging.error("RID_Import:: Can't umount RID.  Appears to be in use according to 'lsof'!")
         sys.exit(3)
 
     md_new = MD_Dir + "/md-" + Rid
@@ -1975,14 +2294,17 @@ def RID_Import(Rid, MD_Dir, Snap=False):
 
     if os.path.isdir(md_new):
         print("Import destination already exists: " + md_new)
-        sys.exit(4)
+#        sys.exit(4)
 
     # Copy the data over from the old MD
     Src = Rid_Folder + "/md/"
     Dst = md_new
+
+    if not os.path.isdir(Src):
+        raise RuntimeError(f"Metadata source directory {Src} missing")
+
     if not os.path.isdir(Src) or os.path.islink(Src):
-        print("ERROR:  Metadata source directory " +
-              Src + " doesn't appear to exist!")
+        print("ERROR:  Metadata source directory " + Src + " doesn't appear to exist!")
         sys.exit(1)
 
     logging.debug("RID_Import:: Copying metadata from " + Src + " to " + Dst)
@@ -1998,7 +2320,11 @@ def RID_Import(Rid, MD_Dir, Snap=False):
             copyfolder(Src + "/" + i, Dst + "/" + i)
         else:
             logging.debug("RID_Import:: Copying file " + Src + i + " to " + Dst + "/" + i)
-            shutil.copyfile(Src + "/" + i, Dst + "/" + i)
+            if os.path.isfile(Src + "/" + i):
+                if not os.path.isdir(Dst): # + "/" + i):
+                    os.mkdir(Dst)
+                if not os.path.isfile(Src + "/" + i):
+                    shutil.copyfile(Src + "/" + i, Dst + "/" + i)
 
     # Update the rid.info file
     with open(Rid_Info, "w") as f:
@@ -2015,25 +2341,7 @@ def RID_Import(Rid, MD_Dir, Snap=False):
     RID_Mount(Rid)
 
 
-def copyfolder(src, dst, symlinks=False, ignore=None):
-    logging.debug("copyfolder:: src = " + src + " and dst = " + dst)
-    if not os.path.exists(dst):
-        logging.debug("copyfolder:: creating directory " + dst)
-        os.makedirs(dst)
-    for item in os.listdir(src):
-        logging.debug("copyfolder:: iterating over src " + item)
-        s = os.path.join(src, item)
-        d = os.path.join(dst, item)
-        if os.path.isdir(s):
-            logging.debug("copyfolder:: calling shutil.copyfolder to copy " + s + " to  " + d)
-            shutil.copyfolder(s, d, symlinks, ignore)
-        else:
-            if not os.path.exists(d) or os.stat(s).st_mtime - os.stat(d).st_mtime > 1:
-                logging.debug("copyfolder:: calling shutil.copy2 to copy " + s + " to  " + d)
-                shutil.copy2(s, d)
-
-
-def RID_Export(Rid, MD_Dir="", Snap=False):
+def RID_Export(Rid, MD_Dir = "", Snap = False):
 
     # Get the version of IBP server
     IBP_Server_Ver = int(Get_IBP_Server_Version().split("|")[1])
@@ -2043,8 +2351,7 @@ def RID_Export(Rid, MD_Dir="", Snap=False):
     if IBP_Server_Ver == 0:
         logging.debug("RID_Export:: IBP Server isn't running, so can't determine metadata version this way.")
 
-    logging.debug(
-        "RID_Export:: IBP Server Version (timestamp) = " + str(IBP_Server_Ver))
+    logging.debug("RID_Export:: IBP Server Version (timestamp) = " + str(IBP_Server_Ver))
 
     # If it's a new version of IBP server, we need paths for regular metadata and snapshot metadata
     if IBP_Server_Ver >= 1605071148:
@@ -2078,42 +2385,36 @@ def RID_Export(Rid, MD_Dir="", Snap=False):
     logging.debug("RID_Export:: Depot_Type = " + str(Depot_Type))
 
     if len(Rid_Info) != 4:
-        logging.info("ERROR:  It does not appear that Rid " +
-                     Rid + " is currently imported.")
+        logging.info("ERROR:  It does not appear that Rid " + Rid + " is currently imported.")
         return 1
 
     MD_Export_Dev = Rid_Info[1]
     MD_Import_Folder = Rid_Info[3]
-    logging.debug("RID_Export:: MD_Export_Dev = " + MD_Export_Dev +
-                  " and MD_Import_Folder = " + MD_Import_Folder)
+    logging.debug("RID_Export:: MD_Export_Dev = " + MD_Export_Dev + " and MD_Import_Folder = " + MD_Import_Folder)
 
     if not MD_Import_Folder:
         logging.error("RID_Export:: RID not imported!")
         return 1
 
+    MD_Export_Folder = None
     if Depot_Type == "dev":
-
-        MD_Export_Folder = depot_dir + "/rid-" + Rid + "/md"
+        MD_Export_Folder = depot_dir + f"/rid-{Rid}/md"
         logging.debug("RID_Export:: MD_Export_Folder = " + MD_Export_Folder)
 
         if os.path.islink(MD_Export_Folder):
-            logging.debug("RID_Export:: " + MD_Export_Folder +
-                          " is a symlink, erasing and creating as new directory...")
+            logging.debug("RID_Export:: " + MD_Export_Folder + " is a symlink, erasing and creating as new directory...")
             os.remove(MD_Export_Folder)
 
         if not os.path.isdir(MD_Export_Folder):
-            logging.debug("RID_Export:: Directory " +
-                          MD_Export_Folder + " doesn't exist, so creating...")
+            logging.debug("RID_Export:: Directory " + MD_Export_Folder + " doesn't exist, so creating...")
             os.mkdir(MD_Export_Folder)
 
-        logging.debug("RID_Export:: Mounting " + MD_Export_Dev +
-                      " to folder " + MD_Export_Folder)
+        logging.debug("RID_Export:: Mounting " + MD_Export_Dev + " to folder " + MD_Export_Folder)
         mount_unix(MD_Export_Dev, MD_Export_Folder)
 
         # Remove the import flag
         if os.path.exists(MD_Export_Folder + "/import"):
-	        logging.debug("RID_Export:: Removing file " +
-	                      MD_Export_Folder + "/import")
+	        logging.debug("RID_Export:: Removing file " + MD_Export_Folder + "/import")
 	        os.remove(MD_Export_Folder + "/import")
 
     # Copy the data over
@@ -2125,14 +2426,15 @@ def RID_Export(Rid, MD_Dir="", Snap=False):
 
         if not os.path.exists(Src + "/" + i):
             print("ERROR:  Cannot find source file/dir " + Src + "/" + i)
-            sys.exit(1)
+#            sys.exit(1)
 
         if os.path.isdir(Src + "/" + i):
             logging.debug("RID_Export:: Recursively copying folder " + Src + "/" + i + " to " + Dst + "/" + i)
             copyfolder(Src + "/" + i, Dst + "/" + i)
         else:
-            logging.debug("RID_Export:: Copying file " + Src + "/" + i + " to " + Dst + "/" + i)
-            shutil.copyfile(Src + "/" + i, Dst + "/" + i)
+            if os.path.isfile(Src + "/" + i):
+                logging.debug("RID_Export:: Copying file " + Src + "/" + i + " to " + Dst + "/" + i)
+                shutil.copyfile(Src + "/" + i, Dst + "/" + i)
 
     # Remove the tmp mount if needed
     if Depot_Type == "dev":
@@ -2151,10 +2453,11 @@ def RID_Export(Rid, MD_Dir="", Snap=False):
         shutil.rmtree(MD_Import_Folder)
 
 
-def RID_Detach(Rid, Hostname, Port="6714", Msg="Detaching Rid"):
-    SysExec("ibp_detach_rid " + Hostname +
-            " " + Port + " " + Rid + " 1 " + Msg)
+def RID_Detach(Rid, Hostname, Port = "6714", Msg = "Detaching Rid"):
+    SysExec(f"ibp_detach_rid {Hostname} {Port} {Rid} 1 \"{Msg}\"")
+    #SysExec(f"ibp_detach_rid " + Hostname + " " + Port + " " + Rid + " 1 " + Msg)
 
 
-def RID_Attach(Rid, Hostname, Port="6714", Msg="Attaching Rid"):
-    SysExec("ibp_attach_rid " + Hostname + " " + Port + " " + Rid + " " + Msg)
+def RID_Attach(Rid, Hostname, Port = "6714", Msg = "Attaching Rid"):
+    SysExec(f"ibp_attach_rid {Hostname} {Port} {Rid} \"{Msg}\"")
+    #SysExec(f"ibp_attach_rid " + Hostname + " " + Port + " " + Rid + " " + Msg)
