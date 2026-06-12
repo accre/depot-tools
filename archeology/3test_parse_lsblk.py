@@ -114,6 +114,7 @@ def which(program):
                         for candidate in ext_candidates(exe_file):
                                 if is_exe(candidate):
                                         return candidate
+        return None
 
 
 def parse_lsblk():
@@ -125,7 +126,7 @@ def parse_lsblk():
 
 	Debug("def parse_lsblk() entry")
 
-	map = {}
+	dev_map = {}
 
 	for line in SysExec("lsblk -O -P").splitlines():
 
@@ -139,12 +140,12 @@ def parse_lsblk():
 		if re.search("loop", name):
 			continue
 
-		map["/dev/" + name] = keyval
+		dev_map["/dev/" + name] = keyval
 
-	Debug("parse_lsblk():: final_map = " + str(map))
+	Debug("parse_lsblk():: final_map = " + str(dev_map))
 	Debug("def parse_lsblk() exit")
 
-	return(map)
+	return(dev_map)
 
 
 def parse_lsblk_disks():
@@ -156,60 +157,60 @@ def parse_lsblk_disks():
 
 	Debug("def parse_lsblk_disks() entry")
 
-	map  = parse_lsblk()
+	dev_map  = parse_lsblk()
 
 	# First, iterate over map, find the lowest (h)ctl
 	min_h = 9999
-	for key in map.keys():
+	for key in dev_map.keys():
 
 		# Skip non-SCSI drives that don't have a HCTL value
-		if "HCTL" not in map[key]:
+		if "HCTL" not in dev_map[key]:
 			continue
 
-		h = int(map[key]["HCTL"].split(":")[0])
+		h = int(dev_map[key]["HCTL"].split(":")[0])
 
 		min_h = min(h, min_h)
 
 	# Create a working copy that only contains "disk" info
-	map2 = {}
+	dev_map2 = {}
 
-	for key in map.keys():
+	for key in dev_map.keys():
 
-		if map[key]["TYPE"] != "disk":
+		if dev_map[key]["TYPE"] != "disk":
 			continue
 
-		if "HCTL" not in map[key]:
+		if "HCTL" not in dev_map[key]:
 			continue
 
-		this_h    = int(map[key]["HCTL"].split(":")[0])
+		this_h    = int(dev_map[key]["HCTL"].split(":")[0])
 
 		if this_h != min_h:
 			continue
 
-		map2[key] = map[key]
+		dev_map2[key] = dev_map[key]
 
 	# Iterate over the initial map again.   If there is "mpath" data,
 	# pluck it out and add it to the new map
-	for key in map.keys():
+	for key in dev_map.keys():
 
-		if map[key]["TYPE"] != "mpath":
+		if dev_map[key]["TYPE"] != "mpath":
 			continue
 
 		# Keys to save are "NAME" (mpatha), "KNAME" (dm-0), "PATH" (/dev/mapper/mpatha), "PTUUID" (to match), "PKNAME" (sda)
-		for key2 in map2.keys():
+		for key2 in dev_map2.keys():
 
-			if map2[key2]["PTUUID"] == map[key]["PTUUID"]:
+			if dev_map2[key2]["PTUUID"] == dev_map[key]["PTUUID"]:
 
-				map2[key2]["MP_NAME"]   = key.split("/")[-1]
-				map2[key2]["MP_KNAME"]  = map[key]["KNAME"]
-				map2[key2]["MP_PKNAME"] = map[key]["PKNAME"]
-				map2[key2]["MP_PATH"]   = map[key]["PATH"]
+				dev_map2[key2]["MP_NAME"]   = key.split("/")[-1]
+				dev_map2[key2]["MP_KNAME"]  = dev_map[key]["KNAME"]
+				dev_map2[key2]["MP_PKNAME"] = dev_map[key]["PKNAME"]
+				dev_map2[key2]["MP_PATH"]   = dev_map[key]["PATH"]
 				break
 
-	Debug("parse_lsblk_disks():: final_map = " + str(map))
+	Debug("parse_lsblk_disks():: final_map = " + str(dev_map))
 	Debug("def parse_lsblk_disks() exit")
 
-	return(map2)
+	return(dev_map2)
 
 
 def parse_lsscsi():
@@ -220,7 +221,7 @@ def parse_lsscsi():
 
 	Debug("def parse_lsscsi() entry")
 
-	map = {}
+	dev_map = {}
 
 	c = 0
 
@@ -241,29 +242,29 @@ def parse_lsscsi():
 			sd_dev = "/dev/null" + str(c)
 			c = c + 1
 
-		map[sd_dev] = {}
-		map[sd_dev]["sg_dev"]  = sg_dev
-		map[sd_dev]["hctl"]    = hctl
-		map[sd_dev]["sas_wwn"] = sas_wwn
-		map[sd_dev]["type"]    = type
+		dev_map[sd_dev] = {}
+		dev_map[sd_dev]["sg_dev"]  = sg_dev
+		dev_map[sd_dev]["hctl"]    = hctl
+		dev_map[sd_dev]["sas_wwn"] = sas_wwn
+		dev_map[sd_dev]["type"]    = type
 
 	# Since we have two HBA's, each backplane is visible twice.  Let's eliminate duplicate copies by
 	# iterating over the map and only leaving backplanes from the lowest (h)ctl
 	min_h = 9999
-	for sd_dev in map:
-		h     = int(map[sd_dev]["hctl"].split(":")[0])
+	for sd_dev in dev_map:
+		h     = int(dev_map[sd_dev]["hctl"].split(":")[0])
 		min_h = min(min_h, h)
 
-	map2 = {}
-	for sd_dev, dict in map.items():
-		h     = int(map[sd_dev]["hctl"].split(":")[0])
+	dev_map2 = {}
+	for sd_dev, dict in dev_map.items():
+		h     = int(dev_map[sd_dev]["hctl"].split(":")[0])
 		if h == min_h:
-			map2[sd_dev] = dict
+			dev_map2[sd_dev] = dict
 
-	Debug("parse_lsscsi():: final_map = " + str(map2))
+	Debug("parse_lsscsi():: final_map = " + str(dev_map2))
 	Debug("def parse_lsscsi() exit")
 
-	return(map2)
+	return(dev_map2)
 
 
 def parse_lsscsi_disks():
@@ -274,17 +275,17 @@ def parse_lsscsi_disks():
 
 	Debug("def parse_lsscsi_disks() entry")
 
-	map  = parse_lsscsi()
-	map2 = parse_lsscsi()
+	dev_map  = parse_lsscsi()
+	dev_map2 = parse_lsscsi()
 
-	for key in map.keys():
-		if map[key]["type"] != "disk":
-			del map2[key]
+	for key in dev_map.keys():
+		if dev_map[key]["type"] != "disk":
+			del dev_map2[key]
 
-	Debug("parse_lsblk_disks():: final_map = " + str(map2))
+	Debug("parse_lsblk_disks():: final_map = " + str(dev_map2))
 	Debug("def parse_lsscsi_disks() exit")
 
-	return(map2)
+	return(dev_map2)
 
 
 def parse_lsscsi_enclosures():
@@ -295,55 +296,54 @@ def parse_lsscsi_enclosures():
 
 	Debug("def parse_lsscsi_enclosures() entry")
 
-	map  = parse_lsscsi()
-	map2 = parse_lsscsi()
+	dev_map  = parse_lsscsi()
+	dev_map2 = parse_lsscsi()
 
-	for key in map.keys():
+	for key in dev_map.keys():
 
-		if map[key]["type"] != "enclosu":
-			del map2[key]
+		if dev_map[key]["type"] != "enclosu":
+			del dev_map2[key]
 
-	Debug("parse_lsblk_enclosures():: final_map = " + str(map2))
+	Debug("parse_lsblk_enclosures():: final_map = " + str(dev_map2))
 	Debug("def parse_lsscsi_enclosures() exit")
 
-	return(map2)
+	return(dev_map2)
 
 
-def map_sata_wwn_to_hba_wwn():
+def map_sata_wwn_to_hba_wwn(map_sd_to_sg):
 
-	"""
-	With SATA drives the HBA or backplane sometimes lies about the WWN of the actual drive.
-	Get a list of all drives (so we can map sd_devices to their sg_devices), and then
-	query sg_vpd --page=di <sg_dev> to find the mapping between fake WWN and real WWN.
-	"""
+        """
+        With SATA drives the HBA or backplane sometimes lies about the WWN of the actual drive.
+        Get a list of all drives (so we can map sd_devices to their sg_devices), and then
+        query sg_vpd --page=di <sg_dev> to find the mapping between fake WWN and real WWN.
+        """
 
-	Debug("def map_sata_wwn_to_hb_wwn() entry")
+        Debug("def map_sata_wwn_to_hb_wwn() entry")
 
-	map_sata_wwn_to_hba_wwn = {}
+        map_sata_wwn_to_hba_wwn = {}
 
-	for sd_dev in map_sd_to_sg:
+        for sd_dev in map_sd_to_sg:
 
-		sg_dev = map_sd_to_sg[sd_dev]["sg_dev"]
+                sg_dev = map_sd_to_sg[sd_dev]["sg_dev"]
 
-		wwn_list = []
+                wwn_list = []
 
-		cmd = "sg_vpd --page=di " + str(sg_dev)
-		for line in SysExec("sg_vpd --page=di " + str(sg_dev)).splitlines():
+                for line in SysExec("sg_vpd --page=di " + str(sg_dev)).splitlines():
 
-			if not re.search("0x5", line):
-				continue
+                        if not re.search("0x5", line):
+                                continue
 
-			wwn_list.append(line.strip())
+                        wwn_list.append(line.strip())
 
-		if len(wwn_list) != 2:
-			continue
+                if len(wwn_list) != 2:
+                        continue
 
-		map_sata_wwn_to_hba_wwn[wwn_list[1]] = wwn_list[0]
+                map_sata_wwn_to_hba_wwn[wwn_list[1]] = wwn_list[0]
 
-	Debug("map_sata_wwn_to_hba_wwn():: final_map = " + str(map_sata_wwn_to_hba_wwn))
-	Debug("def map_sata_wwn_to_hb_wwn() exit")
+        Debug("map_sata_wwn_to_hba_wwn():: final_map = " + str(map_sata_wwn_to_hba_wwn))
+        Debug("def map_sata_wwn_to_hb_wwn() exit")
 
-	return(map_sata_wwn_to_hba_wwn)
+        return(map_sata_wwn_to_hba_wwn)
 
 
 def GetLocateLEDState(This_Backplane, This_Slot):
@@ -396,7 +396,7 @@ def map_dm_to_mpath():
 
 	Debug("def map_dm_to_mpath() entry")
 
-	map = {}
+	dev_map = {}
 
 	for line in SysExec("ls -alh /dev/mapper").splitlines():
 
@@ -411,12 +411,12 @@ def map_dm_to_mpath():
 		mpath_dev = re.sub("-part1", "", mpath_dev)
 		mpath_dev = re.sub("-part2", "", mpath_dev)
 
-		map[dm_dev] = mpath_dev
+		dev_map[dm_dev] = mpath_dev
 
-	Debug("map_dm_to_mpath():: final_map = " + str(map))
+	Debug("map_dm_to_mpath():: final_map = " + str(dev_map))
 	Debug("def map_dm_to_mpath() exit")
 
-	return(map)
+	return(dev_map)
 
 
 def map_dm_to_sd_dev():
@@ -427,7 +427,7 @@ def map_dm_to_sd_dev():
 
 	Debug("def map_dm_to_sd_dev() entry")
 
-	map = {}
+	dev_map = {}
 
 	for line in SysExec("ls -1 /sys/block").splitlines():
 		if not re.search("^dm", line):
@@ -440,12 +440,12 @@ def map_dm_to_sd_dev():
 		if re.search("dm-", sd_dev):
 			continue
 
-		map[dm_dev] = sd_dev
+		dev_map[dm_dev] = sd_dev
 
-	Debug("map_dm_to_sd_dev():  final_map = " + str(map))
+	Debug("map_dm_to_sd_dev():  final_map = " + str(dev_map))
 	Debug("def map_dm_to_sd_dev() exit")
 
-	return(map)
+	return(dev_map)
 
 
 def map_mpath_to_sd_dev():
@@ -457,7 +457,7 @@ def map_mpath_to_sd_dev():
 
 	Debug("def map_mpath_to_sd_dev() entry")
 
-	map = {}
+	dev_map = {}
 
 	map_1 = map_dm_to_sd_dev()
 	map_2 = map_dm_to_mpath()
@@ -470,15 +470,15 @@ def map_mpath_to_sd_dev():
 		sd_dev = map_1[dm]
 		mpath  = map_2[dm]
 
-		map[mpath] = sd_dev
+		dev_map[mpath] = sd_dev
 
-	Debug("map_mpath_to_sd_dev:: final_map = " + str(map))
+	Debug("map_mpath_to_sd_dev:: final_map = " + str(dev_map))
 	Debug("def map_mpath_to_sd_dev() exit")
 
-	return(map)
+	return(dev_map)
 
 
-def map_Dev_to_RID():
+def map_Dev_to_RID(multipath_active):
 
         """
         Return a map of /dev/ entry -> RID
@@ -511,7 +511,7 @@ def map_Dev_to_RID():
 
                 if multipath_active:
                         This_Dev = This_Dev.split("/")[2]
-                        This_Dev = map_dm_mpath[This_Dev]
+                        This_Dev = map_dm_mpath.get(This_Dev, This_Dev)
                         This_Dev = "/dev/mapper/" + This_Dev
 
                 Map[This_Dev] = This_Rid
@@ -524,82 +524,79 @@ def map_Dev_to_RID():
 
 def map_enclosures():
 
-	"""
-	Loop over the enclosures and pull together some info on them.
-	"""
+        """
+        Loop over the enclosures and pull together some info on them.
+        """
 
-	Debug("def map_enclosures() entry")
+        Debug("def map_enclosures() entry")
 
-	map_lsscsi = parse_lsscsi_enclosures()
+        map_lsscsi = parse_lsscsi_enclosures()
 
-	map = {}
+        dev_map = {}
 
-	for sd_dev, dict in map_lsscsi.items():
+        for sd_dev, dict in map_lsscsi.items():
 
-		hctl   = dict["hctl"]
-		wwn    = dict["sas_wwn"]
-		sg_dev = dict["sg_dev"]
+                hctl   = dict["hctl"]
+                wwn    = dict["sas_wwn"]
+                sg_dev = dict["sg_dev"]
 
-#		Debug("map_enclosures:: sg_dev = " + str(sg_dev) + " wwn = " + str(wwn) + " hctl = " + str(hctl) + " sd_dev = " + str(sd_dev))
+#       Debug("map_enclosures:: sg_dev = " + str(sg_dev) + " wwn = " + str(wwn) + " hctl = " + str(hctl) + " sd_dev = " + str(sd_dev))
 
-		# WWN maps to the backplane, while HCTL and SG_Dev map depend on number of HBA's.  For a depot with N hba's, they will have N unique values.
-		if not sg_dev in map:
-			map[sg_dev] = {}
+                # WWN maps to the backplane, while HCTL and SG_Dev map depend on number of HBA's.  For a depot with N hba's, they will have N unique values.
+                if not sg_dev in dev_map:
+                        dev_map[sg_dev] = {}
 
-		map[sg_dev]["wwn"]  = wwn
-		map[sg_dev]["hctl"] = hctl
+                dev_map[sg_dev]["wwn"]  = wwn
+                dev_map[sg_dev]["hctl"] = hctl
 
-		# Figure out if it's the "front" or "back" backplane
-		output = SysExec("sg_ses -p aes " + str(sg_dev)).splitlines()
-		num_slots = 0
-		for i in output:
+                # Figure out if it's the "front" or "back" backplane
+                output = SysExec("sg_ses -p aes " + str(sg_dev)).splitlines()
+                num_slots = 0
+                for i in output:
 
-			if re.search("Element type: SAS expander", i):
-				break
+                        if re.search("Element type: SAS expander", i):
+                                break
 
-			if re.search("Element index:", i):
-				num_slots = num_slots + 1
-
-
-		map_lsscsi[sd_dev]["num_slots"] = num_slots
-
-		if num_slots == 12:
-			map_lsscsi[sd_dev]["alias"] = "Back"
-
-		if num_slots == 24:
-			map_lsscsi[sd_dev]["alias"] = "Front"
-
-		for line in SysExec("sg_ses -p cf " + sg_dev).splitlines():
-
-			if re.search("enclosure vendor:", line):
-				enc_vendor = re.sub("vendor:", ":", line)
-				enc_vendor = enc_vendor.split(":")[1].strip()
-				map_lsscsi[sd_dev]["enc_vendor"] = enc_vendor
-
-			if re.search("product:", line):
-				enc_product = re.sub(" rev:", ":", line)
-				enc_product = enc_product.split(":")[2].strip()
-				map_lsscsi[sd_dev]["enc_product"] = enc_product
-
-	Debug("def map_enclosures() exit")
-
-	return(map_lsscsi)
+                        if re.search("Element index:", i):
+                                num_slots = num_slots + 1
 
 
-def map_sg_ses_enclosure_slot_to_sas_wwn():
+                map_lsscsi[sd_dev]["num_slots"] = num_slots
+
+                if num_slots == 12:
+                        map_lsscsi[sd_dev]["alias"] = "Back"
+
+                if num_slots == 24:
+                        map_lsscsi[sd_dev]["alias"] = "Front"
+
+                for line in SysExec("sg_ses -p cf " + sg_dev).splitlines():
+
+                        if re.search("enclosure vendor:", line):
+                                enc_vendor = re.sub("vendor:", ":", line)
+                                enc_vendor = enc_vendor.split(":")[1].strip()
+                                map_lsscsi[sd_dev]["enc_vendor"] = enc_vendor
+
+                        if re.search("product:", line):
+                                enc_product = re.sub(" rev:", ":", line)
+                                enc_product = enc_product.split(":")[2].strip()
+                                map_lsscsi[sd_dev]["enc_product"] = enc_product
+
+        Debug("def map_enclosures() exit")
+
+        return(map_lsscsi)
+
+
+def map_sg_ses_enclosure_slot_to_sas_wwn(map_enc, map_wwn):
 
 	Debug("def map_sg_ses_enclosure_slot_to_sas_wwn() entry")
 
-	map = {}
-
-	map_enc = map_enclosures()
-	map_wwn = map_sata_wwn_to_hba_wwn()
+	dev_map = {}
 
 	for enc in map_enc.keys():
 
 		sg_dev = map_enc[enc]["sg_dev"]
 
-		map[sg_dev] = {}
+		dev_map[sg_dev] = {}
 
 		slot = ""
 		sas_wwn = ""
@@ -638,43 +635,52 @@ def map_sg_ses_enclosure_slot_to_sas_wwn():
 				sas_wwn = line.split(":")[1].strip()
 
 				if protocol == "SATA":
-					sas_wwn = map_wwn[sas_wwn]
+					if sas_wwn in map_wwn:
+						sas_wwn = map_wwn[sas_wwn]
+					else:
+						sas_wwn = "UNKNOWN_WWN"
 
 				if sas_wwn == "0x0":
 					sas_wwn = "EMPTY"
 
-			if slot and not slot in map[sg_dev]:
-				map[sg_dev][slot] = {}
+			if slot and not slot in dev_map[sg_dev]:
+				dev_map[sg_dev][slot] = {}
 
 			if sas_wwn:
-				map[sg_dev][slot]["wwn"] = sas_wwn
+				dev_map[sg_dev][slot]["wwn"] = sas_wwn
 
 			if slot and sas_wwn:
 
 				slot = ""
 				sas_wwn = ""
 
-#	Debug("map_sg_ses_enclosure_slot_to_sas_wwn:: map = " + str(map))
+#	Debug("map_sg_ses_enclosure_slot_to_sas_wwn:: dev_map = " + str(dev_map))
 	Debug("def map_sg_ses_enclosure_slot_to_sas_wwn() exit")
 
-	return(map)
+	return(dev_map)
 
 
-def Return_SD_Dev(wwn_1, map):
+def Return_SD_Dev(wwn_1, dev_map):
 
 	"""
 	Match the given wwn and return the sd_dev that belongs to it
 	"""
 
 #	Debug("Return_SD_Dev::  wwn_1 = " + str(wwn_1))
-#	Debug("Return_SD_Dev::  map   = " + str(map))
+#	Debug("Return_SD_Dev::  dev_map   = " + str(dev_map))
 
 	if wwn_1 == "EMPTY":
 		return("EMPTY")
 
-	for sd_dev in map.keys():
+	if wwn_1 == "UNKNOWN_WWN":
+		return("UNKNOWN")
 
-		wwn_2 = map[sd_dev]["WWN"]
+	for sd_dev in dev_map.keys():
+
+		if "WWN" not in dev_map[sd_dev]:
+			continue
+
+		wwn_2 = dev_map[sd_dev]["WWN"]
 
 		# Now, the actual Serial may be Serial, or Serial +/- 3.   I wish I understood the logic here better.
 		wwn_m1 = hex(int(wwn_2, 16) - 1)
@@ -688,6 +694,27 @@ def Return_SD_Dev(wwn_1, map):
 			return(sd_dev)
 
 	return("UNKNOWN")
+
+
+def GetLocateLEDState_safe(backplane, slot):
+
+        """
+        This function returns the state of the Locate LED on the given backplane/slot
+        """
+
+        if backplane is None or slot is None:
+                return("UNKNOWN")
+
+        This_LedState = SysExec("sg_ses -I " + str(slot) + " --get=ident " + str(backplane)).strip()
+
+        LedState_Descr = "Unknown"
+        if This_LedState == "1":
+                LedState_Descr = "On"
+        if This_LedState == "0":
+                LedState_Descr = "Off"
+
+        return(LedState_Descr)
+
 
 ### Main()
 
@@ -716,7 +743,7 @@ for sd_dev, dict in map_sd_to_sg.items():
 Debug("main:: map_lsblk = " + str(map_lsblk))
 
 ### Map of sd_dev -> RID
-map_dev_to_rid = map_Dev_to_RID()
+map_dev_to_rid = map_Dev_to_RID(multipath_active)
 #Debug("main:: map_dev_to_rid = " + str(map_dev_to_rid))
 
 ### Scan the backplanes and build a dict of useful info
@@ -724,7 +751,8 @@ map_bp_slot = map_enclosures()
 Debug("main:: map_bp_slot = " + str(map_bp_slot))
 
 ### Parse "sg_ses" and get enclosure/slot info for each wwn
-map_es_to_sas_wwn = map_sg_ses_enclosure_slot_to_sas_wwn()
+map_sata_wwn = map_sata_wwn_to_hba_wwn(map_sd_to_sg)
+map_es_to_sas_wwn = map_sg_ses_enclosure_slot_to_sas_wwn(map_bp_slot, map_sata_wwn)
 Debug("main:: map_es_to_sas_wwn = " + str(map_es_to_sas_wwn))
 
 ### Loop over enclosures to find the alias/backplane and add it to map_lsblk
@@ -748,9 +776,10 @@ for sg_dev in map_es_to_sas_wwn:
 				sd_dev = Return_SD_Dev(wwn_1, map_lsblk)
 				Debug("main:: sg_dev " + str(actual_sg_dev) + " slot " + str(slot) + " maps to sd_dev " + str(sd_dev))
 
-				map_lsblk[sd_dev]["backplane"] = actual_sg_dev
-				map_lsblk[sd_dev]["slot"]      = slot
-				map_lsblk[sd_dev]["bp_alias"]  = alias
+				if sd_dev != "UNKNOWN" and sd_dev in map_lsblk:
+					map_lsblk[sd_dev]["backplane"] = actual_sg_dev
+					map_lsblk[sd_dev]["slot"]      = slot
+					map_lsblk[sd_dev]["bp_alias"]  = alias
 
 
 ###########################################################################
@@ -761,11 +790,15 @@ for key in map_lsblk.keys():
 
 	bd = key
 	if multipath_active:
-		bd = map_lsblk[key]["MP_PATH"]
+		if "MP_PATH" in map_lsblk[key]:
+			bd = map_lsblk[key]["MP_PATH"]
+		else:
+			bd = key
 
-	map_lsblk[key]["RID"] = map_dev_to_rid[bd]
-
-
+	if bd in map_dev_to_rid:
+		map_lsblk[key]["RID"] = map_dev_to_rid[bd]
+	else:
+		map_lsblk[key]["RID"] = "UNKNOWN"
 
 
 
@@ -774,9 +807,9 @@ for key in map_lsblk.keys():
 # Add the locate LED status to map_lsblk
 for sd_dev in map_lsblk.keys():
 
-	backplane = map_lsblk[sd_dev]["backplane"]
-	slot      = map_lsblk[sd_dev]["slot"]
-	map_lsblk[sd_dev]["locate_led"] = GetLocateLEDState(backplane, slot)
+	backplane = map_lsblk[sd_dev].get("backplane")
+	slot      = map_lsblk[sd_dev].get("slot")
+	map_lsblk[sd_dev]["locate_led"] = GetLocateLEDState_safe(backplane, slot)
 
 
 ###########################
@@ -832,7 +865,8 @@ for sd_dev, dict in map_lsblk.items():
 
 	bd = sd_dev
 	if multipath_active:
-		bd     = str(dict["MP_PATH"])
+		if "MP_PATH" in dict:
+			bd     = str(dict["MP_PATH"])
 
 	output.append([alias_bp, slot, bd, vendor, model, serial, firmware, type_rota, size, rid, locate])
 
