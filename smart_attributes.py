@@ -57,7 +57,7 @@ FORMAT = "%-" + str(len_key+pad_len) + "s %-" + str(len_value+pad_len) + "s %-" 
 print(FORMAT % ("Attribute", "Value", "Worst", "Thresh", "Raw"))
 print("=========================================================================")
 
-for key, val in Drive_Attributes.items():
+for key, val in sorted(Drive_Attributes.items()):
 
 	val = Drive_Attributes[key]
 
