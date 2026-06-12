@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+
+if [ "${#}" -ne 3 ]; then
+	echo
+	echo "${0} - Get/Set the RO/RW state of a given RID"
+	echo
+	echo "USAGE:  ${0} [get|set] [Dev|RID] [ro|rw]"
+	echo
+	exit 1
+fi
+
+# Do a little munging so we can handle our older BASH/newer Python servers
+# with one script (though in oddball situations with both, prefer the Python version)
+
+[ ! -z $(which set_rid_option    2> /dev/null) ] && SET_RID_OPTION=$(which set_rid_option)
+[ ! -z $(which set_rid_option.py 2> /dev/null) ] && SET_RID_OPTION=$(which set_rid_option.py)
+
+#echo "DEBUG:  SET_RID_OPTION = ${SET_RID_OPTION}"
+
+[ ! -z $(which merge_config      2> /dev/null) ] && MERGE_CONFIG=$(which merge_config)
+[ ! -z $(which merge_config.py   2> /dev/null) ] && MERGE_CONFIG=$(which merge_config.py)
+
+#echo "DEBUG:  MERGE_CONFIG = ${MERGE_CONFIG}"
+
+[ ! -z $(which ibp_server        2> /dev/null) ] && IBP_SERVER=$(which ibp_server)
+[ ! -z $(which ibp_server.py     2> /dev/null) ] && IBP_SERVER=$(which ibp_server.py)
+
+#echo "DEBUG:  IBP_SERVER = ${IBP_SERVER}"
+
+#exit 1
+
+IBP_HOSTNAME=`hostname`
+IBP_PORT="6714"
+VERB="${1}"
+RID="${2}"
+STATE="${3}"
+
+function DIE {
+       	echo -e "ERROR - ${1}" && exit 1
+}
+
+function mark_ro {
+	RO_SIZE="1"
+
+#	echo "DEBUG:  Running the following:"
+#	echo "${SET_RID_OPTION} ${1} rid max_size  ${RO_SIZE} &> /dev/null"
+#	echo "${SET_RID_OPTION} ${1} rid soft_size ${RO_SIZE} &> /dev/null"
+#	echo "${SET_RID_OPTION} ${1} rid hard_size ${RO_SIZE} &> /dev/null"
+
+	${SET_RID_OPTION} ${1} rid max_size  ${RO_SIZE} &> /dev/null
+	${SET_RID_OPTION} ${1} rid soft_size ${RO_SIZE} &> /dev/null
+	${SET_RID_OPTION} ${1} rid hard_size ${RO_SIZE} &> /dev/null
+}
+
+function mark_rw {
+
+	CAPACITY=`lsblock | grep " ${1} " | rev | awk '{ print $1 }' | rev`
+
+	case ${CAPACITY} in
+
+		2000398934016)	RW_SIZE="1773285"  ;;
+		3000592982016)  RW_SIZE="2664477"  ;;
+		4000787030016)  RW_SIZE="3555697"  ;;
+		8001563222016)  RW_SIZE="7180036"  ;;
+		64012505776128) RW_SIZE="7180036"  ;;  # This is 8 TB, this model lies about size
+		10000831348736) RW_SIZE="8975353"  ;;
+		12000138625024) RW_SIZE="10771686" ;;
+		16000900661248) RW_SIZE="14366290" ;;
+		20000588955648) RW_SIZE="18034381" ;;
+		*)		RW_SIZE="1"	   ;;
+	esac
+
+	${SET_RID_OPTION} ${1} rid max_size  ${RW_SIZE} &> /dev/null
+	${SET_RID_OPTION} ${1} rid soft_size ${RW_SIZE} &> /dev/null
+	${SET_RID_OPTION} ${1} rid hard_size ${RW_SIZE} &> /dev/null
+}
+
+# If the user didn't specify either "ro" or "rw", then exit
+[ "${VERB}" != "get" -a "${VERB}" != "set" ] && DIE "Didn't specify either \"get\" or \"set\""
+
+# If the user didn't specify either "ro" or "rw", then exit
+[ "${STATE}" != "ro" -a "${STATE}" != "rw" ] && DIE "Didn't specify either \"rw\" or \"ro\""
+
+# See if it's a RID or /dev
+tmp=`mktemp`
+blkid > ${tmp}
+
+# Since it's a dev, find out what RID it corresponds to
+DEV=`echo ${RID} | rev | cut -d "/" -f 1 | rev`
+IS_DEV=`cat ${tmp} | grep "^/dev/${DEV}[0-9]" | wc -l`
+if [ "${IS_DEV}" -ne "0" ]; then
+	RID=`cat ${tmp} | grep "^/dev/${DEV}[0-9]" | tr " " "\n" | grep "rid-data-" | cut -d "-" -f 3- | sed "s/\"$//"`
+fi
+rm -f ${tmp}
+
+# If the RID isn't mounted, exit
+[ `mount | grep rid-${RID}/data | wc -l` -eq "1" ] || DIE "Rid ${RID} isn't currently mounted."
+
+if [ "${VERB}" == "set" ]; then
+
+	# See if "ibp_server" is running
+	IS_IBP_RUNNING=`ps -ef | grep ibp_server | grep ibp.conf | wc -l`
+
+	# If ibp_server is running, then use the ibp_detach_rid/ibp_attach_rid...
+	if [ "${IS_IBP_RUNNING}" -eq "1" ]; then
+
+		ibp_detach_rid ${IBP_HOSTNAME} ${IBP_PORT} ${RID} 1 "rid_rw_state setting rid ${STATE}"
+
+		# Make changes to rid.settings file
+		[ "${STATE}" == "ro" ] && mark_ro ${RID}
+		[ "${STATE}" == "rw" ] && mark_rw ${RID}
+
+		# merge_config and then remount the RID
+		${MERGE_CONFIG}
+		ibp_attach_rid ${IBP_HOSTNAME} ${IBP_PORT} ${RID} "rid_rw_state done"
+
+	# If ibp_server has crashed, do it this way:
+	elif [ "${IS_IBP_RUNNING}" -eq "0" ]; then
+
+		# Make changes to rid.settings file
+		[ "${STATE}" == "ro" ] && mark_ro ${RID}
+		[ "${STATE}" == "rw" ] && mark_rw ${RID}
+
+		${MERGE_CONFIG}
+
+		${IBP_SERVER} -r -d /depot/ibp.conf
+	fi
+
+elif [ "${VERB}" == "get" ]; then
+
+	RID_SETTINGS="/depot/import/md-${RID}/rid.settings"
+
+	[ -e "${RID_SETTINGS}" ] || DIE "Could not find rid.settings file for ${RID}"
+
+	 MAX_SIZE=`cat ${RID_SETTINGS} | grep "^max_size = "  | cut -d "=" -f 2 | sed "s/ //g"`
+	HARD_SIZE=`cat ${RID_SETTINGS} | grep "^hard_size = " | cut -d "=" -f 2 | sed "s/ //g"`
+	SOFT_SIZE=`cat ${RID_SETTINGS} | grep "^soft_size = " | cut -d "=" -f 2 | sed "s/ //g"`
+
+#	echo "DEBUG:  Max_size = ${MAX_SIZE} and Hard_size = ${HARD_SIZE} and Soft_size = ${SOFT_SIZE}"
+
+	if [ "${MAX_SIZE}" -eq "1" -a "${HARD_SIZE}" -eq "1" -a "${SOFT_SIZE}" -eq "1" ]; then
+		THIS_STATE="ro"
+	else
+		THIS_STATE="rw"
+	fi
+
+	[ "${STATE}" == "${THIS_STATE}" ] && echo "1"
+	[ "${STATE}" != "${THIS_STATE}" ] && echo "0"
+
+fi

@@ -1,0 +1,28 @@
+#!/bin/sh
+
+dd if=/dev/zero of=/dev/sdb bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdc bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdd bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sde bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdf bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdg bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdh bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdi bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdj bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdk bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdl bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdm bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdn bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdo bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdp bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdq bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdr bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sds bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdt bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdu bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdv bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdw bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdx bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdy bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdz bs=1024k count=20480 &
+dd if=/dev/zero of=/dev/sdaa bs=1024k count=20480 &

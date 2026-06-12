@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+NAME=$(basename "${0}")
+
+if [ "${#}" -ne "1" ]; then
+	echo
+	echo "${NAME} - Prepare a RID for yanking."
+	echo
+	echo "Usage: ${NAME} <RID>"
+	echo
+	exit 1
+fi
+
+RID=${1}
+
+if [ ! -e "/dev/disk/by-label/rid-data-${RID}" ]; then
+	echo "ERROR:  RID ${RID} doesn't exist."
+	exit 1
+fi
+
+DEV=$(blkid | grep rid-data-"${RID}" | cut -d "2" -f 1)
+echo "RID ${RID} belongs to Dev ${DEV}"
+
+echo "Executing 'ibp_detach_rid ${HOSTNAME} 6714 ${RID} 1 'Pulling bad RID'"
+ibp_detach_rid "$(hostname)" 6714 "${RID}" 1 "Pulling bad RID"
+
+echo "Executing export_resource ${RID}"
+export_rid.py "${RID}"
+
+echo "Executing umount_resource ${RID}"
+umount_rid.py "${RID}"
+
+N=$(mount | grep rid | grep -c data)
+echo "Setting /etc/number_of_storage drives to ${N}..."
+echo "${N}" > /etc/number_of_storage_drives
+
+Backplane=$(lsslot | grep " ${DEV} " | awk '{ print $2 }')
+     Slot=$(lsslot | grep " ${DEV} " | awk '{ print $4 }')
+echo "Executing light_slot ${Backplane} ${Slot} On"
+light_slot "${Backplane}" "${Slot}" On
+
+echo "RID ${RID} is ready to be pulled!"

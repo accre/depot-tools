@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+for i in $(find /depot/import -name '*SEQUESTER*' ! -path '*old*'); do
+
+	[[ -f "$i" ]] || continue
+
+	RID=$(echo "$i" | tr '/' '\n' | grep '^md' | cut -d '-' -f 2)
+
+	[[ -n "$RID" ]] || continue
+
+	STATUS=$(tail -n 1 "$i" 2>/dev/null) || continue
+
+	[[ -e "/dev/disk/by-label/rid-data-${RID}" ]] || continue
+
+	[[ "$STATUS" != *"NOT_SEQUESTERED"* ]] || continue
+
+	echo "RID ${RID} is ${STATUS}"
+done

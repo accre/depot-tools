@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+PROGRAM_NAME=`basename ${0}`
+
+if [ "${#}" -ne "1" ]; then
+	echo
+	echo "${PROGRAM_NAME} - Query a SMART attribute on all drives in the depot."
+	echo
+	echo "Usage: ${PROGRAM_NAME} [Smart ID# or Attribute name]"
+	echo
+	echo "Example:  ${PROGRAM_NAME} 5                   # Will return 5 Reallocated_Sector_Ct"
+	echo "          ${PROGRAM_NAME} Start_Stop_Count    # Will return 4 Start_Stop_Count"
+	echo
+	exit 1
+fi
+
+query=${1}
+
+echo "Drive        Value    Worst    Thresh    Raw"
+echo "=================================================="
+
+for dev in `lsblock | grep "disk:hd" | awk '{ print $1 }'`
+do
+	attr="ERROR"
+
+	# If the input is a Smart Attribute name, go this way...
+	if [[ "${query}" =~ "_" ]] ; then
+		attr=`smart_attributes ${dev} | grep "_${query}"`
+	fi
+
+	# If the input is a Smart ID#, go this way...
+	if [[ "${query}" =~ ^[0-9]+$ ]] ; then
+		attr=`smart_attributes ${dev} | grep "^${query}_"`
+	fi
+
+	# Some drives may not have that SMART attribute.  Print this instead.
+	Value="NO_ATTR"
+	Worst="NO_ATTR"
+	Thresh="NO_ATTR"
+	Raw="NO_ATTR"
+
+	if [ "${attr}" != "ERROR" -a -n "${attr}" ]; then
+	 	 Value=`echo ${attr} | awk '{ print $2 }'`
+		 Worst=`echo ${attr} | awk '{ print $3 }'`
+		Thresh=`echo ${attr} | awk '{ print $4 }'`
+	   	   Raw=`echo ${attr} | awk '{ print $5 }'`
+	fi
+
+	printf '%-13s %-8s %-8s %-8s %-15s\n' ${dev} ${Value} ${Worst} ${Thresh} ${Raw}
+done

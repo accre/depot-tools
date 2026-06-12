@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+
+################################################################################
+### This script looks for blank drives and missing RIDS, and opportunistically
+### formats all that it can.   The script will *not* attempt to format a drive
+### that already has a LStore RID on it.
+###
+### Right now the script works correctly for blank drives, but in cases where
+### drives have been previously used and already have partitions on them it
+### can break.   This will eventually be corrected once it can be done safely.
+################################################################################
+
+function DEBUG {
+	echo "[ DEBUG ] - $*"
+}
+
+function INFO {
+	echo "[ INFO  ] - $*"
+}
+
+function DIE {
+        echo -e "DIE ERROR - ${1}" && exit 1
+}
+
+# Number of drives per depot
+NUMDRIVES=36
+
+# What's the first RID in depot1 (1501)
+STARTDEPOT=1
+STARTRID=1501
+
+# Disable multipathing when formatting
+type -P multipath >/dev/null && sudo multipath -F
+
+# This depot
+THISDEPOT=$(hostname | cut -d "." -f 1 | grep -oE '[0-9]+$')
+
+# Derive the first RID number for this depot
+[[ "$THISDEPOT" =~ ^[0-9]+$ ]] || { DIE "Invalid depot number: $THISDEPOT"; }
+THISSTARTRID=$((1501 + 36 * (THISDEPOT - STARTDEPOT)))
+#THISSTARTRID=$(echo "1501 + 36*(${THISDEPOT} - ${STARTDEPOT})"| bc)
+
+# A list of valid block devices.   If it isn't one of these, then presume the
+# depot had a bounced drive or some other situation.   Note that in multipathing
+# situations where multiple OS block devices (/dev/sda, /dev/sdb) point to the
+# same physical disk, the logic in VALID_DATA_BD will only report each physical
+# drive once
+OS_DRV=$(lsblk -o NAME,TYPE,ROTA | grep disk | grep 0$ | awk '{ print $1 }')
+VALID_DATA_BD=$(lsblk -o SERIAL,NAME,TYPE,ROTA | grep disk | grep 1$ | awk '{ print $1,$2 }' | sort | awk '{serials[$1] = serials[$1] ? serials[$1] "," $2 : $2} END {for (s in serials) print s, serials[s]}' | cut -d " " -f 2 | cut -d "," -f 1)
+
+DEBUG "OS_DRV        = $(echo ${OS_DRV} | tr "\n" " ")"
+DEBUG "VALID_DATA_BD = $(echo ${VALID_DATA_BD} | tr "\n" " ")"
+
+# Now get a list of all valid RIDs for this depot
+VALID_RIDS=""
+for j in $(seq 1 $NUMDRIVES)
+do
+	NEXTRID=$(echo "${THISSTARTRID} + $j - 1" | bc)
+	VALID_RIDS="${VALID_RIDS} ${NEXTRID}"
+done
+
+# Create a map of /dev/ to rid
+DEV_TO_RID=$(mktemp)
+ls -alh /dev/disk/by-label | grep rid-data | rev | awk '{ print $3,$1 }' | rev | sed "s/ rid-data-/|/" | sed "s/..\/..\///" | sed "s/2|/|/" > "${DEV_TO_RID}"
+
+# Get a list of all free RIDS (ie, RIDS that are valid and do not currently exist on the depot)
+FREE_RID=""
+for RID in ${VALID_RIDS}
+do
+	IS_DEPOT_RID=$(cat "${DEV_TO_RID}" | grep -c "|${RID}$")
+	if [ "${IS_DEPOT_RID}" -eq "1" ]; then
+		continue
+	fi
+	FREE_RID="${FREE_RID} ${RID}"
+done
+DEBUG "FREE_RID = ${FREE_RID}"
+
+# Get a list of all free block devices (drives which aren't currently hosting valid RID's)
+FREE_BD=""
+for BD in ${VALID_DATA_BD}
+do
+
+	if [ ! -e "/dev/${BD}" ] ; then
+		DEBUG "Skipping /dev/${BD} since it doesn't exist."
+		continue
+	fi
+
+	THIS_RID=$(cat "${DEV_TO_RID}" | grep "^${BD}|" | cut -d "|" -f 2)
+
+	# If the "RID" is null, then it's free
+	if [ -z "${THIS_RID}" ]; then
+		FREE_BD="${FREE_BD} ${BD}"
+		continue	# So it doesn't get counted twice
+	fi
+
+	# Also, if the RID isn't being used by a "good" RID, it's free
+	IS_VALID=$(echo "${VALID_RIDS}" | grep -wc "${THIS_RID}")
+	if [ "${IS_VALID}" -ne "1" ]; then
+		FREE_BD="${FREE_BD} ${BD}"
+		continue
+	fi
+done
+DEBUG "FREE_BD = ${FREE_BD}"
+
+rm -f "${DEV_TO_RID}"
+
+## Since we have old scripts and new scripts, try to find them and
+## use an alias
+
+CREATE_RID=$(which create_rid.py)
+[ ! -e "${CREATE_RID}" ] && CREATE_RID=$(which create_resource.dev)
+[ ! -e "${CREATE_RID}" ] && DIE "Could not find a CREATE_RID command"
+DEBUG "CREATE_RID = ${CREATE_RID}"
+
+SET_RID_OPTION=$(which set_rid_option.py)
+[ ! -e "${SET_RID_OPTION}" ] && SET_RID_OPTION=$(which set_rid_option)
+[ ! -e "${SET_RID_OPTION}" ] && DIE "Could not find a SET_RID_OPTION command"
+DEBUG "SET_RID_OPTION = ${SET_RID_OPTION}"
+
+IMPORT_RID=$(which import_rid.py)
+[ ! -e "${IMPORT_RID}" ] && IMPORT_RID=$(which import_resource)
+[ ! -e "${IMPORT_RID}" ] && DIE "Could not find a IMPORT_RID command"
+DEBUG "IMPORT_RID = ${IMPORT_RID}"
+
+MERGE_CONFIG=$(which merge_config.py)
+[ ! -e "${MERGE_CONFIG}" ] && MERGE_CONFIG=$(which merge_config)
+[ ! -e "${MERGE_CONFIG}" ] && DIE "Could not find a MERGE_CONFIG command"
+DEBUG "MERGE_CONFIG = ${MERGE_CONFIG}"
+
+INFO "FREE_RID = ${FREE_RID}"
+INFO "FREE_BD  = ${FREE_BD}"
+
+#exit
+
+# Now print out something similar to "2581|/dev/sdb"
+FREE_BD_SAVE=${FREE_BD}
+DEBUG "First section..."
+PIDS=()
+for RID in $FREE_RID
+do
+
+	[ -z "${FREE_BD}" ] && continue
+	THIS_BD=$(echo "${FREE_BD}" | awk '{ print $1 }')
+	[ -z "${THIS_BD}" ] && continue
+
+	FREE_BD=$(echo "${FREE_BD}" | sed "s/\b${THIS_BD}\b//")
+
+	DEBUG "${RID}|/dev/${THIS_BD}"
+
+#	continue
+
+	TS=$(date +%s%N)  # nanoseconds
+	[ -d "/depot/import/md-${RID}" ] && mv /depot/import/md-"${RID}" /depot/import/${RANDOM}-old-md-"${RID}"-"${TS}"
+
+	DEBUG "Creating RID ${RID} on /dev/${THIS_BD}"
+	${CREATE_RID} "${RID}" /dev/"${THIS_BD}" &
+	PIDS+=($!)
+done
+
+INFO "Waiting for all create_rid processes to finish..."
+wait "${PIDS[@]}"
+
+FREE_BD=${FREE_BD_SAVE}
+DEBUG "Second section..."
+for RID in $FREE_RID
+do
+
+	[ -z "${FREE_BD}" ] && continue
+	THIS_BD=$(echo "${FREE_BD}" | awk '{ print $1 }')
+	[ -z "${THIS_BD}" ] && continue
+
+	FREE_BD=$(echo "${FREE_BD}" | sed "s/\b${THIS_BD}\b//")
+
+	DEBUG "${RID}|/dev/${THIS_BD}"
+
+	DEBUG "${SET_RID_OPTION} ${RID} rid enable_chksum 1"
+	${SET_RID_OPTION} ${RID} rid enable_chksum 1
+
+	DEBUG "${SET_RID_OPTION} ${RID} minfree_size 40960"
+	${SET_RID_OPTION} ${RID} rid minfree_size 40960
+
+	DEBUG "${SET_RID_OPTION} ${RID} update_alloc 0"
+	${SET_RID_OPTION} ${RID} rid update_alloc 0
+
+	DEBUG "${SET_RID_OPTION} ${RID} n_history 32"
+	${SET_RID_OPTION} ${RID} rid n_history 32
+
+	DEBUG "${SET_RID_OPTION} ${RID} enable_history_update_on_delete 1"
+	${SET_RID_OPTION} ${RID} rid enable_history_update_on_delete 1
+
+	DEBUG "${IMPORT_RID} ${RID}"
+	${IMPORT_RID} "${RID}"
+
+	DEBUG "merge_config"
+	${MERGE_CONFIG}
+
+#	DEBUG "ibp_attach_rid ${HOSTNAME} 6714 ${RID}"
+#	ibp_attach_rid `hostname` 6714 ${RID}
+
+done
+
+set_ini_option.py /depot/ibp.settings server force_resource_rebuild 0
