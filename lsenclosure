@@ -279,20 +279,23 @@ def map_enclosures():
         if num_slots == 31:
             base_alias = "Valiant"
         elif num_slots == 24:
-            base_alias = "Back"
-        elif num_slots == 12:
             base_alias = "Front"
+        elif num_slots == 12:
+            base_alias = "Back"
         elif num_slots == 36:
             base_alias = "Unified"
         elif num_slots == 30:
              base_alias = "Valiant" # Fallback for the other Valiant backplane
 
-        # Make Unique: Append index to the alias
-        # Example: "Valiant_1", "Valiant_2"
-        unique_alias = f"{base_alias}_{enclosure_index + 1}"
+        # "Valiant" servers can have more than one backplane, so add a unique
+        # identifier to each one.
+        if base_alias == "Valiant":
+             unique_alias = f"{base_alias}_{enclosure_index + 1}"
+             enclosure_index += 1
+        else:
+             unique_alias = f"{base_alias}"
+
         dedup[wwn]["alias"] = unique_alias
-        
-        enclosure_index += 1
 
     Debug("EXIT: map_enclosures", {"count": len(dedup), "wwns": list(dedup.keys()), "aliases": {k: v['alias'] for k, v in dedup.items()}})
     return dedup
