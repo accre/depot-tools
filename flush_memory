@@ -1,0 +1,81 @@
+#!/bin/bash
+
+lock_file=/tmp/flush_lock
+
+(
+  #lock_file=/tmp/.flush_memory
+  last_file=/tmp/flush_last
+  count_file=/tmp/flush_count
+  count_max=1000000
+  debug=0
+++
+  flock -n 200
+
+  # Check if another instance is running
+  if [ $? -ne 0 ]; then
+    echo "Skipping flush.  Another already running..." $(cat ${lock_file})
+    exit 0
+  fi
+
+  if [ "${1}" == "-h" ]; then
+    echo "${0}" full_divisor high_load
+    exit
+  fi
+
+  # Parse the arguments
+  (( divisor = count_max + 1 ))
+  [ "${1}" != "" ] && divisor=${1}
+  high_load=0
+  [ "${2}" != "" ] && high_load=${2}
+
+  [ ${debug} == "1" ] && echo "divisor=${divisor} high_load=${high_load}"
+
+  # Get the count
+  if [ -e ${count_file} ]; then
+     count=$(head -n 1 ${count_file})
+     (( count++ ))
+  else
+     count=1
+  fi
+
+  # Default is to NOT do everything
+  dofull=0
+
+  # Get the load and check it
+#  cpu_load=$(uptime | cut -f5 -d: | cut -f1 -d, | tr -d " ")
+#  cpu_load=$(uptime | cut -f3 -d, | tr -d " " | cut -f2 -d:)
+  cpu_load=$(uptime | sed -e 's/average:/=/g' | tr -d " " | cut -f2 -d= | cut -f1 -d,)
+  dofull=$(echo "${cpu_load} < ${high_load}" | bc)
+
+  [ ${debug} == "1" ] && echo "count=${count} cpu=${cpu_load} cdo=${dofull}"
+
+  # Check if we its time to do everything
+  (( n = count / divisor ))
+  (( m = n * divisor ))
+  [ "${m}" == "${count}" ] && dofull=1
+
+  [ ${debug} == "1" ] && echo "count=${count} m=${m} n=${n} do=${dofull}"
+
+  # Update the count
+  [ ${count} -ge ${count_max} ] && count=0
+  echo ${count} > ${count_file}
+
+  date > ${lock_file}
+  if [ "${dofull}" == "1" ]; then
+     ( time ( date && echo "count=${count} divisor=${divisor} load=${cpu_load} high=${high_load} dofull=${dofull}" \
+         && sync \
+         && echo 2 > /proc/sys/vm/drop_caches \
+         && echo 1 > /proc/sys/vm/drop_caches \
+         && echo 1 > /proc/sys/vm/compact_memory \
+         && date) \
+     ) &> ${last_file}
+  else
+     ( time ( date && echo "count=${count} divisor=${divisor} load=${cpu_load} high=${high_load} dofull=${dofull}" \
+         && echo 1 > /proc/sys/vm/drop_caches \
+         && echo 1 > /proc/sys/vm/compact_memory \
+         && date) \
+     ) &> ${last_file}
+  fi
+) 200>${lock_file}
+
+#rm ${lock_file}

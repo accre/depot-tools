@@ -1,0 +1,25 @@
+#!/bin/bash
+#-----------------------------------------------------------
+#  foreach_rid - Executes the given command on each mounted RID
+#
+#     foreach_rid command
+#
+#        where command is any valid OS command with =RID= being
+#        being replaced by the actual RID
+#-----------------------------------------------------------
+
+#. depot_common
+
+if [ "${1}" == "" ]; then
+  echo 
+  echo "foreach_rid command"
+  echo "   where command is any valid command containing =RID="
+  echo "   which is replaced by the actual RID."
+  exit 1
+fi
+
+for rid in $(list_rid.py -rid-only)
+do
+   cmd=$(echo "$*" | sed -e "s/=RID=/${rid}/g")
+   ${cmd}
+done
