@@ -791,13 +791,22 @@ for s in all_slots:
                     size = HumanFriendlySizeBytes(total_bytes)
 
         # --- RID Logic ---
+        # CHECK ALL ASSOCIATED BLOCK DEVICES FOR A RID
         rid = "UNKNOWN"
-        lookup_dev = devs.split(",")[0] if devs and devs != "-" else None
         
-        if lookup_dev and lookup_dev in map_dev_to_rid:
-            rid = map_dev_to_rid[lookup_dev]
-        elif not multipath_active and s["drive_wwn"] and s["drive_wwn"] in map_dev_to_rid:
-             rid = map_dev_to_rid[s["drive_wwn"]]
+        # 1. Check the aggregated devices list (includes /dev/sd* and potentially /dev/mapper/mpath*)
+        if devs and devs != "-":
+            device_list = [d.strip() for d in devs.split(",")]
+            for check_dev in device_list:
+                if check_dev in map_dev_to_rid:
+                    rid = map_dev_to_rid[check_dev]
+                    # Use this device as the primary display if found, as it's likely the preferred path
+                    primary_dev = check_dev
+                    break
+        
+        # 2. Fallback: Check the drive WWN directly in the map (for legacy or specific mappings)
+        if rid == "UNKNOWN" and s["drive_wwn"] and s["drive_wwn"] in map_dev_to_rid:
+            rid = map_dev_to_rid[s["drive_wwn"]]
 
         # --- Locate LED Logic ---
         locate = "UNKNOWN"
