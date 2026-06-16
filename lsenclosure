@@ -12,17 +12,6 @@ import time
 from subprocess import Popen, PIPE, STDOUT
 from shutil import which
 
-# ------------------------------------------------------------------
-# Dependency Check
-# ------------------------------------------------------------------
-try:
-    from prettytable import PrettyTable
-except ImportError:
-    print("ERROR: Python module 'prettytable' is not installed.")
-    print("Please install it using: pip3 install prettytable")
-    sys.exit(1)
-
-# Cache info
 _CACHE = {}
 
 PRINT_DEBUG = False
@@ -59,9 +48,45 @@ def Bin_Requires(bin):
     return bin_path
 
 
-# Added 'multipath' to the list of required binaries to check for multipath support
+# Check for required binaries
 for bin in ("sg_ses", "sg_vpd", "lsblk", "lsscsi"):
     Bin_Requires(bin)
+
+
+# ------------------------------------------------------------------
+# Enclosure Detection
+# ------------------------------------------------------------------
+
+def enclosures_exist():
+    """
+    Check whether any storage enclosures are present.
+
+    Method 1 – lsscsi -g | grep enclos
+    Method 2 – scan /sys/class/enclosure
+    """
+    # Method 1: lsscsi -g (pipe handled in Python, not via shell)
+    lsscsi_bin = which("lsscsi")
+    if lsscsi_bin:
+        try:
+            out = SysExec("lsscsi -g")
+            if re.search(r'enclos', out, re.IGNORECASE):
+                Debug("Enclosure detected via lsscsi")
+                return True
+        except Exception:
+            pass
+
+    # Method 2: sysfs
+    enc_root = "/sys/class/enclosure"
+    if os.path.isdir(enc_root):
+        try:
+            entries = os.listdir(enc_root)
+            if entries:
+                Debug("Enclosure detected via sysfs:", entries)
+                return True
+        except OSError:
+            pass
+
+    return False
 
 
 ######################################################################
@@ -104,7 +129,7 @@ def parse_lsblk_disks():
         # Strictly filter for physical disks only
         if raw[k].get("TYPE") != "disk":
             continue
-        
+
         disks[k] = raw[k]
 
     Debug("EXIT: parse_lsblk_disks", {"count": len(disks)})
@@ -193,7 +218,7 @@ def aggregate_physical_disks(map_lsblk):
     for sd_dev, d in map_lsblk.items():
 
         wwn = d.get("WWN", "") or sd_dev
-        
+
         if not wwn:
             wwn = sd_dev
 
@@ -215,11 +240,11 @@ def aggregate_physical_disks(map_lsblk):
             for key in ("slot", "backplane", "bp_alias"):
                 if key in d and key not in physical[wwn]:
                     physical[wwn][key] = d[key]
-            
+
             # Ensure we keep the data from the TYPE=disk entry
             current_type = physical[wwn].get("TYPE", "")
             new_type = d.get("TYPE", "")
-            
+
             if new_type == "disk" and current_type != "disk":
                 physical[wwn] = {**d, "DEVICES": physical[wwn]["DEVICES"], "SG_DEVICES": physical[wwn]["SG_DEVICES"]}
                 for key in ("slot", "backplane", "bp_alias"):
@@ -239,7 +264,7 @@ def map_enclosures():
     raw = parse_lsscsi_enclosures()
 
     dedup = {}
-    
+
     enclosure_index = 0
 
     for sd_dev, d in raw.items():
@@ -279,20 +304,18 @@ def map_enclosures():
 
         dedup[wwn]["num_slots"] = num_slots
         dedup[wwn]["drive_slot_indices"] = drive_slot_indices
-        dedup[wwn]["sg_dev"] = sg_dev 
+        dedup[wwn]["sg_dev"] = sg_dev
 
         # Assign Base Alias
         base_alias = "Unknown"
-        if num_slots == 31:
-            base_alias = "Valiant"
-        elif num_slots == 24:
+        if num_slots == 24:
             base_alias = "Front"
         elif num_slots == 12:
             base_alias = "Back"
         elif num_slots == 36:
             base_alias = "Unified"
         elif num_slots == 30:
-             base_alias = "Valiant" 
+             base_alias = "Valiant"
 
         if base_alias == "Valiant":
              unique_alias = f"{base_alias}_{enclosure_index + 1}"
@@ -365,12 +388,12 @@ def map_sg_to_enclosure():
     for enc_name in os.listdir(enclosure_root):
         enc_path = os.path.realpath(os.path.join(enclosure_root, enc_name))
         enc_parent = os.path.dirname(os.path.dirname(enc_path))
-        
+
         for sg in os.listdir("/sys/class/scsi_generic"):
             sg_path = os.path.realpath(f"/sys/class/scsi_generic/{sg}/device")
             if sg_path == enc_parent:
                 mapping[f"/dev/{sg}"] = enc_name
-                
+
     Debug("EXIT: map_sg_to_enclosure", mapping)
     return mapping
 
@@ -386,36 +409,36 @@ def map_enclosure_slots_sysfs():
     for enc_name in os.listdir(enclosure_root):
         enc_path = os.path.join(enclosure_root, enc_name)
         mapping[enc_name] = {}
-        
+
         try:
             slot_entries = os.listdir(enc_path)
         except OSError:
             continue
-            
+
         for slot_name in slot_entries:
             slot_path = os.path.join(enc_path, slot_name)
             if not os.path.isdir(slot_path):
                 continue
-                
+
             block_dir = os.path.join(slot_path, "device", "block")
             if not os.path.isdir(block_dir):
                 continue
-                
+
             try:
                 devices = os.listdir(block_dir)
             except OSError:
                 continue
-                
+
             if not devices:
                 continue
-                
+
             dev = "/dev/" + devices[0]
             slot_match = re.search(r"(\d+)", slot_name)
             if not slot_match:
                 continue
-                
+
             mapping[enc_name][int(slot_match.group(1))] = dev
-            
+
     Debug("EXIT: map_enclosure_slots_sysfs", mapping)
     return mapping
 
@@ -467,9 +490,9 @@ def get_physical_size_bytes(dev_name):
     """
     # Extract just the device name (e.g., 'sda' from '/dev/sda')
     dev_name = dev_name.replace("/dev/", "")
-    
+
     sys_path = f"/sys/block/{dev_name}/size"
-    
+
     try:
         with open(sys_path, 'r') as f:
             sectors = int(f.read().strip())
@@ -483,7 +506,7 @@ def HumanFriendlySizeBytes(total_bytes):
     """
     if total_bytes is None or total_bytes == 0:
         return "-"
-    
+
     # Base 10 Multipliers
     if total_bytes >= 1000000000000: # TB
         return f"{total_bytes / 1000000000000:.1f} TB"
@@ -587,8 +610,49 @@ def GetLocateLEDState_safe(backplane, slot):
     return(LedState_Descr)
 
 ######################################################################
+# CUSTOM TABLE FORMATTER
+######################################################################
+
+def format_table(headers, rows):
+    """
+    Prints a simple ASCII table without prettytable dependency.
+    """
+    if not rows:
+        return
+
+    # Calculate column widths
+    col_widths = [len(str(h)) for h in headers]
+
+    for row in rows:
+        for i, val in enumerate(row):
+            str_val = str(val) if val is not None else ""
+            if i < len(col_widths):
+                col_widths[i] = max(col_widths[i], len(str_val))
+
+    # Create separator line
+    separator = "+" + "+".join("-" * (w + 2) for w in col_widths) + "+"
+
+    # Print Header
+    header_row = "|" + "|".join(f" {str(h).ljust(col_widths[i])} " for i, h in enumerate(headers)) + "|"
+    print(separator)
+    print(header_row)
+    print(separator)
+
+    # Print Rows
+    for row in rows:
+        row_str = "|" + "|".join(f" {str(val).ljust(col_widths[i])} " for i, val in enumerate(row)) + "|"
+        print(row_str)
+
+    print(separator)
+
+######################################################################
 # MAIN
 ######################################################################
+
+# Quick exit: no enclosures present
+if not enclosures_exist():
+    print("No enclosure detected.")
+    sys.exit(0)
 
 Debug("=== START MAIN EXECUTION ===")
 
@@ -743,11 +807,25 @@ Debug("RID map generated", {"count": len(map_dev_to_rid)})
 Debug("Generating output table...")
 output = []
 
+headers = [
+    "Backplane",
+    "Slot",
+    "Dev",
+    "Vendor",
+    "Model",
+    "Serial",
+    "Firmware",
+    "Media",
+    "Size",
+    "Rid",
+    "Locate",
+]
+
 for s in all_slots:
     slot_str = s["slot"]
     alias_bp = s["alias"]
     sg_dev = s["sg_dev"]
-    
+
     disk_data = None
     if s["drive_wwn"]:
         if s["drive_wwn"] in physical_disks:
@@ -756,17 +834,17 @@ for s in all_slots:
             disk_data = s["drive_data"]
     else:
         disk_data = s["drive_data"]
-    
+
     if disk_data:
         devs = ",".join(sorted(disk_data.get("DEVICES", [])))
         if not devs:
              devs = s["drive_wwn"] or "-"
-             
+
         vendor = str(disk_data.get("VENDOR", "")).strip()
         model = str(disk_data.get("MODEL", "")).strip()
         serial = str(disk_data.get("SERIAL", "")).strip()
         firmware = str(disk_data.get("REV", "")).strip()
-        
+
         rota = str(disk_data.get("ROTA", "")).strip()
         rota_txt = {"1": "hd", "0": "ssd"}.get(rota, "unknown")
         media = "disk:" + rota_txt
@@ -779,7 +857,7 @@ for s in all_slots:
         # We use the first device in the DEVICES list, assuming it's the primary block device (e.g. sda)
         primary_dev = devs.split(",")[0] if devs and devs != "-" else None
         size = "-"
-        
+
         if primary_dev:
             # Remove /dev/ prefix if present for sysfs path
             clean_dev = primary_dev.replace("/dev/", "")
@@ -793,7 +871,7 @@ for s in all_slots:
         # --- RID Logic ---
         # CHECK ALL ASSOCIATED BLOCK DEVICES FOR A RID
         rid = "UNKNOWN"
-        
+
         # 1. Check the aggregated devices list (includes /dev/sd* and potentially /dev/mapper/mpath*)
         if devs and devs != "-":
             device_list = [d.strip() for d in devs.split(",")]
@@ -803,7 +881,7 @@ for s in all_slots:
                     # Use this device as the primary display if found, as it's likely the preferred path
                     primary_dev = check_dev
                     break
-        
+
         # 2. Fallback: Check the drive WWN directly in the map (for legacy or specific mappings)
         if rid == "UNKNOWN" and s["drive_wwn"] and s["drive_wwn"] in map_dev_to_rid:
             rid = map_dev_to_rid[s["drive_wwn"]]
@@ -839,32 +917,13 @@ for s in all_slots:
         locate,
     ])
 
-x = PrettyTable([
-    "Backplane",
-    "Slot",
-    "Dev",
-    "Vendor",
-    "Model",
-    "Serial",
-    "Firmware",
-    "Media",
-    "Size",
-    "Rid",
-    "Locate",
-])
-
-x.padding_width = 1
-x.align = "l"
-
+# Sort the output
 output.sort(key=lambda r: (
-    0 if r[0] == "Direct" else 1, 
-    r[0], 
+    0 if r[0] == "Direct" else 1,
+    r[0],
     int(r[1]) if r[1] != "-" else 999999
 ))
 
-for row in output:
-    x.add_row(row)
-
 Debug("Output table generation complete", {"rows": len(output)})
-print(x)
+format_table(headers, output)
 Debug("=== END MAIN EXECUTION ===")
