@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+Power Control Script for Storage Enclosures
+Optimized for Python 3.8+ with parallel processing and better error handling.
+"""
+
+import argparse
+import re
+import sys
+import subprocess
+import time
+from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Constants
+ENCLOSURE_ALIASES = {
+    "30": "Valiant",
+    "36": "Unified",
+    "24": "Front",
+    "12": "Back",
+}
+
+@dataclass
+class Enclosure:
+    sg_dev: str
+    hctl: str
+    sas_addr: str
+    num_slots: str
+    alias: str
+
+def run_command(cmd: List[str], timeout: int = 10) -> str:
+    """
+    Run a shell command and return stdout as a string.
+    """
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            timeout=timeout,
+        )
+        return result.stdout.decode("utf-8")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Command {' '.join(cmd)} failed with stderr: {e.stderr.decode('utf-8', errors='ignore')}", file=sys.stderr)
+        return ""
+    except subprocess.TimeoutExpired:
+        print(f"Warning: Command {' '.join(cmd)} timed out.", file=sys.stderr)
+        return ""
+    except Exception as e:
+        print(f"Warning: Unexpected error running command: {' '.join(cmd)}: {e}", file=sys.stderr)
+        return ""
+
+def parse_sas_addr(sg_dev: str) -> str:
+    """Extract SAS address from sg_ses AES page."""
+    output = run_command(["sg_ses", "--page=aes", sg_dev])
+    if not output:
+        return "UNKNOWN_SAS"
+
+    for line in output.splitlines():
+        if "Primary enclosure logical identifier" in line:
+            parts = line.split()
+            if len(parts) >= 2:
+                return parts[-1]
+    return "UNKNOWN_SAS"
+
+def parse_num_slots(sg_dev: str) -> str:
+    """Extract number of slots from sg_ses CF page."""
+    output = run_command(["sg_ses", "--page=cf", sg_dev])
+    if not output:
+        return "UNKNOWN_SLOTS"
+
+    # Robust regex for slot count
+    match = re.search(r"number of possible elements\s*:\s*(\d+)", output, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return "UNKNOWN_SLOTS"
+
+def get_enclosure_info(sg_dev: str) -> Tuple[str, str, str]:
+    """
+    Get SAS address, slot count, and alias for an enclosure.
+    Returns (sas_addr, num_slots, alias)
+    """
+    sas_addr = parse_sas_addr(sg_dev)
+    num_slots = parse_num_slots(sg_dev)
+    alias = ENCLOSURE_ALIASES.get(num_slots, "UNKNOWN_ALIAS")
+    return sas_addr, num_slots, alias
+
+def list_enclosures() -> List[Enclosure]:
+    """
+    List all valid storage enclosures using parallel processing for speed.
+    """
+    lsscsi_output = run_command(["lsscsi", "-g"])
+    if not lsscsi_output:
+        print("Error: Could not execute 'lsscsi -g'.", file=sys.stderr)
+        sys.exit(1)
+
+    enclosures = []
+    sg_devices = []
+
+    # Parse lsscsi output to find SG devices
+    for line in lsscsi_output.splitlines():
+        if "enclosu" not in line.lower():
+            continue
+        if "VirtualSES" in line:
+            continue
+
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+
+        hctl = parts[0].strip("[]")
+        sg_dev = parts[-1]
+
+        if Path(sg_dev).exists():
+            sg_devices.append((sg_dev, hctl))
+
+    if not sg_devices:
+        print("Warning: No enclosures found.", file=sys.stderr)
+        return []
+
+    # Parallelize sg_ses calls
+    with ThreadPoolExecutor(max_workers=min(10, len(sg_devices))) as executor:
+        future_to_sg = {
+            executor.submit(get_enclosure_info, sg_dev): sg_dev 
+            for sg_dev, _ in sg_devices
+        }
+
+        for future in as_completed(future_to_sg):
+            sg_dev = future_to_sg[future]
+            try:
+                sas_addr, num_slots, alias = future.result()
+                # Find corresponding HCTL
+                hctl = next(h for s, h in sg_devices if s == sg_dev)
+                enclosures.append(Enclosure(
+                    sg_dev=sg_dev,
+                    hctl=hctl,
+                    sas_addr=sas_addr,
+                    num_slots=num_slots,
+                    alias=alias
+                ))
+            except Exception as e:
+                print(f"Warning: Failed to process enclosure {sg_dev}: {e}", file=sys.stderr)
+
+    return enclosures
+
+def find_enclosure_device(enclosure_identifier: str, enclosures: List[Enclosure]) -> str:
+    """
+    Resolve enclosure identifier (alias or SG device path) to SG device path.
+    """
+    # Case 1: Direct SG device path
+    if enclosure_identifier.startswith("/dev/sg"):
+        if Path(enclosure_identifier).exists():
+            return enclosure_identifier
+        else:
+            print(f"Error: Device '{enclosure_identifier}' does not exist.", file=sys.stderr)
+            sys.exit(1)
+
+    # Case 2: Alias
+    identifier_lower = enclosure_identifier.lower()
+    for enc in enclosures:
+        if enc.alias.lower() == identifier_lower:
+            return enc.sg_dev
+
+    # If not found, print available aliases for user help
+    available_aliases = [e.alias for e in enclosures if e.alias != "UNKNOWN_ALIAS"]
+    print(f"Error: Enclosure alias '{enclosure_identifier}' not found.", file=sys.stderr)
+    if available_aliases:
+        print(f"Available aliases: {', '.join(available_aliases)}", file=sys.stderr)
+    sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Turn the drive in the given backplane/slot on or off"
+    )
+    parser.add_argument(
+        "backplane",
+        help="Enclosure identifier (alias like 'Front', 'Back' or SG device like '/dev/sg1')"
+    )
+    parser.add_argument(
+        "slot",
+        type=int,
+        help="Slot number"
+    )
+    parser.add_argument(
+        "state",
+        help="Power state ('on' or 'off', case-insensitive)"
+    )
+
+    args = parser.parse_args()
+
+    # Validate state
+    state_lower = args.state.lower()
+    if state_lower not in ["on", "off"]:
+        parser.error(f"argument state: invalid choice: '{args.state}' (choose from 'on', 'off')")
+
+    # Check if direct device path is provided
+    if args.backplane.startswith("/dev/sg"):
+        if not Path(args.backplane).exists():
+            print(f"Error: Device '{args.backplane}' does not exist.", file=sys.stderr)
+            sys.exit(1)
+        sg_device = args.backplane
+    else:
+        # List enclosures to resolve alias
+        enclosures = list_enclosures()
+        if not enclosures:
+            print("Error: No enclosures found.", file=sys.stderr)
+            sys.exit(1)
+        sg_device = find_enclosure_device(args.backplane, enclosures)
+
+    # Determine sg_ses verb
+    # Note: --clear=devoff turns the power ON (clears the 'device off' indicator)
+    #       --set=devoff turns the power OFF (sets the 'device off' indicator)
+    if state_lower == "on":
+        verb = "--clear=devoff"
+    else:
+        verb = "--set=devoff"
+
+    print(f"Setting slot {args.slot} on {args.backplane} to {state_lower}")
+
+    # Execute the command
+    result = run_command(["sg_ses", "-I", str(args.slot), verb, sg_device])
+
+if __name__ == "__main__":
+    main()
