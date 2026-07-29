@@ -46,55 +46,55 @@ elif Reports == "Practical":
 
 def Debug(text):
 
-        """
-        A wrapper to print debugging info on a single line.
-        """
+	"""
+	A wrapper to print debugging info on a single line.
+	"""
 
-        if Print_Debug:
-                print("DEBUG: " + text)
-        return()
+	if Print_Debug:
+		print("DEBUG: " + text)
+	return()
 
 def SysExec(cmd):
 
-        """
-        Run the given command and return the output
-        """
+	"""
+	Run the given command and return the output
+	"""
 
-        # Cache the output of the command for the given number of seconds
-        Cache_Expires = 60
+	# Cache the output of the command for the given number of seconds
+	Cache_Expires = 60
 
-        # Computed once, used twice
-        Cache_Keys = list(CacheDataArray.keys())
-        if cmd in Cache_Keys:
-                Cache_Age  = time.time() - CacheTimeArray[cmd]
-        else:
-                Cache_Age  = 0
+	# Computed once, used twice
+	Cache_Keys = list(CacheDataArray.keys())
+	if cmd in Cache_Keys:
+		Cache_Age  = time.time() - CacheTimeArray[cmd]
+	else:
+		Cache_Age  = 0
 
-        Return_Val = "ERROR"
+	Return_Val = "ERROR"
 
-        # If we have valid data cached, return it
-        if cmd in Cache_Keys and Cache_Age < Cache_Expires:
-                Return_Val = CacheDataArray[cmd]
+	# If we have valid data cached, return it
+	if cmd in Cache_Keys and Cache_Age < Cache_Expires:
+		Return_Val = CacheDataArray[cmd]
 
-        # If the cmd is "cat", use fopen/fread/fclose to open it and
-        # cache it as we go
-        elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
-                f = open(cmd.split()[1], "r")
-                CacheDataArray[cmd] = f.read()
-                CacheTimeArray[cmd] = time.time()
-                f.close()
-                Return_Val = CacheDataArray[cmd]
+	# If the cmd is "cat", use fopen/fread/fclose to open it and
+	# cache it as we go
+	elif not cmd in Cache_Keys and cmd.split()[0] == "cat":
+		f = open(cmd.split()[1], "r")
+		CacheDataArray[cmd] = f.read()
+		CacheTimeArray[cmd] = time.time()
+		f.close()
+		Return_Val = CacheDataArray[cmd]
 
-        # If we don't have cached data, or it's too old, regenerate it
-        elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
-                CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-                CacheTimeArray[cmd] = time.time()
-                Return_Val = CacheDataArray[cmd]
+	# If we don't have cached data, or it's too old, regenerate it
+	elif not cmd in Cache_Keys or Cache_Age > Cache_Expires:
+		CacheDataArray[cmd] = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
+		CacheTimeArray[cmd] = time.time()
+		Return_Val = CacheDataArray[cmd]
 
-        if str(type(Return_Val)) == "<class 'bytes'>":
-                Return_Val = Return_Val.decode("utf-8")
+	if str(type(Return_Val)) == "<class 'bytes'>":
+		Return_Val = Return_Val.decode("utf-8")
 
-        return(Return_Val)
+	return(Return_Val)
 
 
 def ComputerFriendlyBytes(bytes, scale, units, optional_scale = None):
@@ -178,7 +178,7 @@ def findRawSize(SD_Device):
 			secsize = SysExec("cat " + tfile).strip()
 
 		return int(numsec) * int(secsize)
-	
+
 	if re.search("^/c", SD_Device):
 
 		f = SysExec("storcli64 " + SD_Device + " show all")
@@ -214,12 +214,10 @@ def map_dev_to_rid():
 
 
 def findVendor(SD_Device):
-
 	file = "/sys/block/" + SD_Device.split("/")[-1] + "/device/vendor"
 	f = open(file, "r")
 	vendor = f.read()
 	f.close()
-
 	return(vendor.strip())
 
 def findMBVendor():
@@ -230,14 +228,11 @@ def findMBVendor():
 	return(vendor.strip())
 
 def findModel(SD_Device):
-
 	file = "/sys/block/" + SD_Device.split("/")[-1] + "/device/model"
 	f = open(file, "r")
 	model = f.read()
 	f.close()
-
 	return(model.strip())
-
 
 def findSerial(SD_Device):
 	file = "/sys/block/" + SD_Device.split("/")[-1] + "/device/vpd_pg80"
@@ -288,9 +283,6 @@ def printDevVirt_storcli(Dev, Vendor, Model, Serial, Str):
 
 	print('{:20s}|{:4s}|{:15s}|{:7s}|{:2s}|{:22s}|{:4s}|{:30s}' . format(socket.gethostname(), Dev, Serial, " ", " ", Vendor + " " + Model, Size, Dev + ":" + Str))
 
-#	print(socket.gethostname() + " " + str(Dev) + " [" + str(Vendor) + " " + str(Model) + ", serial " + str(Serial) + "] - " + str(Str))
-
-
 
 def Get_SASController():
 
@@ -310,9 +302,6 @@ def Get_SASController():
 
 	if not SAS_Controller:
 		SAS_Controller = [ "Unknown" ]
-
-#	if len(SAS_Controller) == 1:
-#		SAS_Controller = SAS_Controller[0]
 
 	Debug("Get_SASController()::  SAS Controller type = " + str(SAS_Controller))
 
@@ -559,7 +548,6 @@ for Dev in Devs:
 
 			# At this point, the only thing left should be actual SMART attributes, so pluck them out
 			smart_attributes = dict(zip(smart_attributes_headers, line.split()))
-#			Debug("Dev " + Dev + " smart_attributes = " + str(smart_attributes))
 
 			# This is a corner case where value, worst and thresh are all 0.  Just ignore
 			if smart_attributes["value"] == "000" and smart_attributes["worst"] == "000" and smart_attributes["thresh"] == "000":
