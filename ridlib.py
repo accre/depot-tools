@@ -2321,10 +2321,9 @@ def RID_Import(Rid, MD_Dir, Snap = False):
         else:
             logging.debug("RID_Import:: Copying file " + Src + i + " to " + Dst + "/" + i)
             if os.path.isfile(Src + "/" + i):
-                if not os.path.isdir(Dst): # + "/" + i):
+                if not os.path.isdir(Dst):
                     os.mkdir(Dst)
-                if not os.path.isfile(Src + "/" + i):
-                    shutil.copyfile(Src + "/" + i, Dst + "/" + i)
+                shutil.copyfile(Src + "/" + i, Dst + "/" + i)
 
     # Update the rid.info file
     with open(Rid_Info, "w") as f:
