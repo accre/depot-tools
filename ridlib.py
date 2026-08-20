@@ -31,6 +31,55 @@ from typing import Union
 
 depot_dir = "/depot"  # This was originally shared via the depot_common file.
 
+# ---------------------------------------------------------------------------
+# NVMe-aware block device helpers
+#
+# Traditional SCSI/SATA drives append the partition number directly to the
+# whole-disk name (e.g. the 2nd partition on /dev/sda is /dev/sda2), but NVMe
+# drives insert a "p" between the disk name and the partition number (e.g.
+# /dev/nvme0n1p2).  The helpers below centralize that naming convention so the
+# rest of the library can treat both styles the same way.
+# ---------------------------------------------------------------------------
+
+def is_nvme_device(dev):
+    """
+    Return True if *dev* is an NVMe whole-disk device (e.g. /dev/nvme0n1).
+    """
+    return bool(re.match(r"^/dev/nvme[0-9]+n[0-9]+$", str(dev)))
+
+
+def partition_name(Dev, partnum):
+    """
+    Return the full device name for partition *partnum* of whole-disk *Dev*.
+
+        partition_name("/dev/sda", 2)     -> "/dev/sda2"
+        partition_name("/dev/nvme0n1", 2) -> "/dev/nvme0n1p2"
+    """
+    if is_nvme_device(Dev):
+        return str(Dev) + "p" + str(partnum)
+    return str(Dev) + str(partnum)
+
+
+def strip_partition(Dev):
+    """
+    Return the whole-disk name for a partition (or whole disk) name.
+
+        strip_partition("/dev/sda2")      -> "/dev/sda"
+        strip_partition("/dev/nvme0n1p2") -> "/dev/nvme0n1"
+
+    NVMe names are recognized by their "nvme<number>n<number>" form so a
+    whole disk's trailing digits (e.g. /dev/nvme10n3) are not mistaken for
+    a partition number.
+    """
+    dev = str(Dev)
+    # NVMe whole disk (e.g. /dev/nvme10n3): no partition number to strip
+    if re.match(r"^/dev/nvme[0-9]+n[0-9]+$", dev):
+        return dev
+    # NVMe partition (e.g. /dev/nvme10n3p12): strip the trailing p<number>
+    if re.match(r"^/dev/nvme[0-9]+n[0-9]+p[0-9]+$", dev):
+        return re.sub(r"p[0-9]+$", "", dev)
+    # SCSI/SATA (e.g. /dev/sda2): strip the trailing <number>
+    return re.sub(r"[0-9]+$", "", dev)
 CacheDataArray = {}
 CacheTimeArray = {}
 
@@ -413,7 +462,7 @@ def Generate_Rid_to_Dev_Dict():
 
             rid = line.split("-")[2]
             dev = os.path.realpath("/dev/disk/by-label/" + line)
-            dev = re.sub("[0-9]*$", "", dev)
+            dev = strip_partition(dev)
 
             Dict_Rid_to_Dev[rid] = dev
 
@@ -431,7 +480,7 @@ def Generate_Dev_to_Rid_Dict():
 
         rid = line.split("-")[2]
         dev = os.path.realpath("/dev/disk/by-label/" + line)
-        dev = re.sub("[0-9]*$", "", dev)
+        dev = strip_partition(dev)
 
         Dict_Dev_to_Rid[dev] = rid
 
@@ -843,8 +892,8 @@ def RID_Mount(Rid):
         sys.exit(1)
 
     Dev = Dict_Rid_to_Dev[Rid]
-    md_dev = Dev + "1"
-    data_dev = Dev + "2"
+    md_dev = partition_name(Dev, 1)
+    data_dev = partition_name(Dev, 2)
 
     logging.debug("RID_Mount:: md_dev = " + md_dev + " and data_dev = " + data_dev)
 
@@ -1089,7 +1138,7 @@ def RID_Sequester(Rid, Msg):
         Rid_to_Dev = Generate_Rid_to_Dev_Dict()
         Dev = Rid_to_Dev[Rid]
         Metadata_Path = tempfile.mkdtemp()
-        mount_unix(Dev + "1", Metadata_Path)
+        mount_unix(partition_name(Dev, 1), Metadata_Path)
         Unmount_Later = 1
 
     Sequester_file = Metadata_Path + "/SEQUESTER_STATUS"
@@ -1143,7 +1192,7 @@ def RID_Unsequester(Rid, Msg):
         Rid_to_Dev = Generate_Rid_to_Dev_Dict()
         Dev = Rid_to_Dev[Rid]
         Metadata_Path = tempfile.mkdtemp()
-        mount_unix(Dev + "1", Metadata_Path)
+        mount_unix(partition_name(Dev, 1), Metadata_Path)
         Unmount_Later = 1
 
     Sequester_file = Metadata_Path + "/SEQUESTER_STATUS"
@@ -1504,7 +1553,7 @@ def RID_Check_Sequester(Rid):
         Metadata_Path = Metadata_Location.split(":")[1]
 
     if re.search("^BLOCKDEV", Metadata_Location):
-        MD_Partition = Metadata_Location.split(":")[1] + "1"
+        MD_Partition = partition_name(Metadata_Location.split(":")[1], 1)
         logging.debug("RID_Check_Sequester:: Metadata Partition = " + MD_Partition)
 
         Dict_Rid_To_Dev = Generate_Rid_to_Dev_Dict()
@@ -1513,7 +1562,7 @@ def RID_Check_Sequester(Rid):
         if not is_partition_mounted(MD_Partition):
             logging.debug("RID_Check_Sequester:: Metadata partition is unmounted.  Mounting to check import...")
             Metadata_Path = tempfile.mkdtemp()
-            mount_unix(Dev + "1", Metadata_Path)
+            mount_unix(partition_name(Dev, 1), Metadata_Path)
         else:
             logging.debug("RID_Check_Sequester:: Metadata partition is mounted.  Checking import and then leaving mounted.")
             mounts = SysExecUncached("mount")
@@ -1550,6 +1599,9 @@ def findRawSize(SD_Device):
 
     secsize = "0"
     numsec = "0"
+
+    # Use the whole-disk name for /sys/block; partitions are not there.
+    SD_Device = strip_partition(SD_Device)
 
     tfile = "/sys/block/" + SD_Device.split("/")[-1] + "/size"
     if os.path.isfile(tfile):
@@ -1619,8 +1671,9 @@ def RID_Fsck(Rid):
 
     Partitions = []
     for i in range(0, 255):
-        if partition_exists(Dev + str(i)):
-            Partitions.append(Dev + str(i))
+        Part = partition_name(Dev, i)
+        if partition_exists(Part):
+            Partitions.append(Part)
 
     logging.debug("RID_Fsck::  Partitions = " + str(Partitions))
 
@@ -2120,7 +2173,11 @@ def RID_Create(Rid, Dev, AssumeYes=False):
 
     # Unmount any existing partitions belonging to this drive
     for line in SysExec("mount").splitlines():
-        if re.search("^" + Dev + "[0-9]", line):
+        if is_nvme_device(Dev):
+            part_re = "^" + re.escape(Dev) + "p[0-9]"
+        else:
+            part_re = "^" + re.escape(Dev) + "[0-9]"
+        if re.search(part_re, line):
             part = line.split()[0]
             logging.info("RID_Create:: Detected mounted partition " + part + ".  Attempting to umount...")
             SysExec("umount -f " + part)
@@ -2153,13 +2210,15 @@ def RID_Create(Rid, Dev, AssumeYes=False):
     time.sleep(5)
 
     # Format the partitions
+    md_dev = partition_name(Dev, 1)
+    data_dev = partition_name(Dev, 2)
     logging.info("RID_Create:: Formatting metadata partition...")
-    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-md-" + Rid + " " + Dev + "1"
+    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-md-" + Rid + " " + md_dev
     logging.info("cmd = " + cmd)
     subprocess.call(cmd.split())
 
     logging.info("RID_Create:: Formatting data partition...")
-    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-data-" + Rid + " " + Dev + "2"
+    cmd = "mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -F -q -L rid-data-" + Rid + " " + data_dev
     logging.info("cmd = " + cmd)
     subprocess.call(cmd.split())
 
@@ -2173,10 +2232,10 @@ def RID_Create(Rid, Dev, AssumeYes=False):
             os.mkdir(dir)
 
     mtopt = "-o noatime,nodiratime"
-    cmd = "mount " + mtopt + " " + Dev + "1 " + Rname + "/md"
+    cmd = "mount " + mtopt + " " + md_dev + " " + Rname + "/md"
     subprocess.call(cmd.split())
 
-    cmd = "mount " + mtopt + " " + Dev + "2 " + Rname + "/data"
+    cmd = "mount " + mtopt + " " + data_dev + " " + Rname + "/data"
     subprocess.call(cmd.split())
 
     # Get the version of IBP server
@@ -2212,7 +2271,7 @@ def RID_Create(Rid, Dev, AssumeYes=False):
 
     # Make the info file
     with open(Rname + "/rid.info", "w") as f:
-        f.write("dev:" + Dev + "1:" + Dev + "2\n")
+        f.write("dev:" + partition_name(Dev, 1) + ":" + partition_name(Dev, 2) + "\n")
     f.close()
 
     logging.info("RID_Create:: Configuration stored in " + Rname + "/md/rid.settings")

@@ -8,6 +8,7 @@ import re
 import os
 import sys
 import time
+import subprocess
 
 from subprocess import Popen, PIPE, STDOUT
 from shutil import which
@@ -28,16 +29,43 @@ def Debug(*args):
             print("DEBUG: " + str(arg))
 
 
-def SysExec(cmd):
+def _run(argv, timeout=10):
+    """
+    Run argv (list form, no shell). Returns (returncode, combined_output).
+    Never raises: OS errors and timeouts are reported via the return code.
+    """
+    try:
+        proc = Popen(argv, stdout=PIPE, stderr=STDOUT)
+    except OSError as e:
+        return 127, "ERROR: could not run %s: %s" % (" ".join(argv), e)
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.communicate()
+        except Exception:
+            pass
+        return 124, ""
+    text = out.decode("utf-8", "replace") if isinstance(out, bytes) else (out or "")
+    return proc.returncode, text
+
+
+def SysExec(cmd, timeout=10):
+    """
+    Run a whitespace-separated command (no shell features) and return the
+    combined stdout/stderr text. Output is cached for 20 seconds.
+    The exit code is not propagated; callers inspect the returned text.
+    """
     CACHE_TTL = 20
     now = time.time()
     if cmd in _CACHE and now - _CACHE[cmd][0] < CACHE_TTL:
         return _CACHE[cmd][1]
-    result = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT).communicate()[0]
-    if isinstance(result, bytes):
-        result = result.decode("utf-8")
-    _CACHE[cmd] = (now, result)
-    return result
+    rc, out = _run(cmd.split(), timeout=timeout)
+    if rc != 0:
+        Debug("SysExec: rc=%d cmd=%s output=%r" % (rc, cmd, out[:200]))
+    _CACHE[cmd] = (now, out)
+    return out
 
 
 def Bin_Requires(bin):
@@ -61,25 +89,23 @@ def enclosures_exist():
     """
     Check whether any storage enclosures are present.
 
-    Method 1 – lsscsi -g | grep enclos
-    Method 2 – scan /sys/class/enclosure
+    Method 1 - lsscsi -g, look for a device whose TYPE column is "enclosu"
+    Method 2 - scan /sys/class/enclosure (ignoring the VirtualSES
+               pseudo-enclosure)
     """
     # Method 1: lsscsi -g (pipe handled in Python, not via shell)
-    lsscsi_bin = which("lsscsi")
-    if lsscsi_bin:
-        try:
-            out = SysExec("lsscsi -g")
-            if re.search(r'enclos', out, re.IGNORECASE):
+    if which("lsscsi"):
+        for line in SysExec("lsscsi -g").splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[1] == "enclosu":
                 Debug("Enclosure detected via lsscsi")
                 return True
-        except Exception:
-            pass
 
     # Method 2: sysfs
     enc_root = "/sys/class/enclosure"
     if os.path.isdir(enc_root):
         try:
-            entries = os.listdir(enc_root)
+            entries = [e for e in os.listdir(enc_root) if e != "VirtualSES"]
             if entries:
                 Debug("Enclosure detected via sysfs:", entries)
                 return True
@@ -99,18 +125,18 @@ def parse_lsblk():
     m = {}
 
     for line in SysExec("lsblk -O -P").splitlines():
+        if not line.strip():
+            continue
 
-        keyval = dict(
-            re.findall(
-                r'(\w+)="([^"]+)"',
-                re.sub("-", "_", line)
-            )
-        )
+        keyval = dict(re.findall(r'(\w+)="([^"]*)"', line))
+
+        if "NAME" not in keyval:
+            continue
 
         name = keyval["NAME"]
         del keyval["NAME"]
 
-        if re.search("loop", name):
+        if name.startswith("loop"):
             continue
 
         m["/dev/" + name] = keyval
@@ -138,24 +164,40 @@ def parse_lsblk_disks():
 
 def parse_lsscsi():
     Debug("ENTER: parse_lsscsi")
-    m = {}
+    """
+    Parse `lsscsi -gUN`. Field layout:
 
-    c = 0
+        [H:C:T:L] type sas_name devnode scsinode
+
+    e.g.  [2:0:0:0] disk  wwn-0x5000...  /dev/sda  /dev/sg0
+          [6:0:0:1] enclosu 0x5006...   -       /dev/sg1
+
+    Enclosures/SES devices have no block device (devnode is "-"); they
+    are keyed by their scsinode instead. Rows with too few fields or
+    without a usable scsinode are skipped.
+    """
+    m = {}
 
     for line in SysExec("lsscsi -gUN").splitlines():
 
         line = " ".join(line.split())
 
         fields = line.split()
+        if len(fields) < 5:
+            continue
+
         hctl = fields[0].strip("[]")
         type_ = fields[1]
         sas_wwn = fields[2]
         sd_dev = fields[3]
         sg_dev = fields[4]
 
-        if sd_dev == "-":
-            sd_dev = "/dev/null" + str(c)
-            c += 1
+        if not sg_dev or sg_dev == "-":
+            continue
+
+        if not sd_dev or sd_dev == "-":
+            # Enclosure/SES device: no block node, key on the sg node
+            sd_dev = sg_dev
 
         m[sd_dev] = {
             "sg_dev": sg_dev,
@@ -176,7 +218,7 @@ def parse_lsscsi_disks():
 
     for k in raw.keys():
 
-        if raw[k]["type"] != "disk":
+        if raw[k].get("type") != "disk":
             continue
 
         out[k] = raw[k]
@@ -193,13 +235,62 @@ def parse_lsscsi_enclosures():
 
     for k in raw.keys():
 
-        if raw[k]["type"] != "enclosu":
+        if raw[k].get("type") != "enclosu":
             continue
 
         out[k] = raw[k]
 
     Debug("EXIT: parse_lsscsi_enclosures", {"count": len(out)})
     return out
+
+
+######################################################################
+# SAS WWN HELPERS
+######################################################################
+
+
+AES_SLOT_ADDR_RE = re.compile(r"SAS address: (0x[0-9A-Fa-f]+)")
+
+
+def parse_aes_slots(ses_output):
+    """
+    Parse the output of `sg_ses --page=aes` into a list of
+    (element_type, element_index, sas_address) tuples.
+
+    The "SAS address:" line for each element follows its "Element index:"
+    line; "attached SAS address:" lines (the address of the device
+    attached to the slot, repeated elsewhere) are ignored, as is the
+    enclosure header's "SAS address (in hex):" line. Elements without
+    an address line are omitted.
+    """
+    slots = []
+    current_type = ""
+    pending_index = None
+
+    for line in ses_output.splitlines():
+        if "Element type:" in line:
+            parts = line.split(":", 1)
+            current_type = parts[1].strip() if len(parts) > 1 else ""
+            pending_index = None
+            continue
+
+        if "Element index:" in line:
+            parts = line.split(":", 1)
+            try:
+                pending_index = int(parts[1].split()[0])
+            except (ValueError, IndexError):
+                pending_index = None
+            continue
+
+        if "attached SAS address" in line:
+            continue
+
+        m = AES_SLOT_ADDR_RE.search(line)
+        if m and pending_index is not None:
+            slots.append((current_type, pending_index, m.group(1)))
+            pending_index = None
+
+    return slots
 
 
 ######################################################################
@@ -210,46 +301,45 @@ def parse_lsscsi_enclosures():
 def aggregate_physical_disks(map_lsblk):
     Debug("ENTER: aggregate_physical_disks")
     """
-    Group all paths to the same physical disk by WWN.
+    Group all paths to the same physical disk by WWN. Drives without a
+    WWN cannot be grouped and are excluded (callers fall back to the
+    per-device data).
     """
 
     physical = {}
 
     for sd_dev, d in map_lsblk.items():
 
-        wwn = d.get("WWN", "") or sd_dev
-
+        wwn = (d.get("WWN", "") or "").strip()
         if not wwn:
-            wwn = sd_dev
+            continue
 
         if wwn not in physical:
             physical[wwn] = {**d, "DEVICES": [sd_dev], "SG_DEVICES": []}
 
-            if "sg_dev" in d:
+            if d.get("sg_dev"):
                 physical[wwn]["SG_DEVICES"].append(d["sg_dev"])
 
         else:
             physical[wwn]["DEVICES"].append(sd_dev)
 
-            if "sg_dev" in d:
+            if d.get("sg_dev") and d["sg_dev"] not in physical[wwn]["SG_DEVICES"]:
                 physical[wwn]["SG_DEVICES"].append(d["sg_dev"])
 
             #
             # Prefer entries with enclosure data
             #
             for key in ("slot", "backplane", "bp_alias"):
-                if key in d and key not in physical[wwn]:
+                if d.get(key) and not physical[wwn].get(key):
                     physical[wwn][key] = d[key]
 
             # Ensure we keep the data from the TYPE=disk entry
-            current_type = physical[wwn].get("TYPE", "")
-            new_type = d.get("TYPE", "")
-
-            if new_type == "disk" and current_type != "disk":
-                physical[wwn] = {**d, "DEVICES": physical[wwn]["DEVICES"], "SG_DEVICES": physical[wwn]["SG_DEVICES"]}
-                for key in ("slot", "backplane", "bp_alias"):
-                    if key in d:
-                        physical[wwn][key] = d[key]
+            if d.get("TYPE") == "disk" and physical[wwn].get("TYPE") != "disk":
+                keep = {}
+                for key in ("DEVICES", "SG_DEVICES", "slot", "backplane", "bp_alias"):
+                    if physical[wwn].get(key) and not d.get(key):
+                        keep[key] = physical[wwn][key]
+                physical[wwn] = {**d, **keep}
 
     Debug("EXIT: aggregate_physical_disks", {"count": len(physical)})
     return physical
@@ -268,7 +358,12 @@ def map_enclosures():
     enclosure_index = 0
 
     for sd_dev, d in raw.items():
-        wwn = d["sas_wwn"]
+        wwn = d.get("sas_wwn", "")
+
+        if wwn in ("", "none"):
+            # No SAS name reported; use a unique pseudo-id so multiple
+            # such enclosures are not collapsed into one.
+            wwn = "no-sas-wwn-%d" % len(dedup)
 
         if wwn in dedup:
             continue
@@ -278,29 +373,12 @@ def map_enclosures():
         dedup[wwn] = dict(d)
 
         # Determine slot count ONLY for Array device slots
-        ses_output = SysExec("sg_ses -p aes " + str(sg_dev))
-        lines = ses_output.splitlines()
-
-        current_element_type = ""
-        num_slots = 0
-        drive_slot_indices = []
-
-        for line in lines:
-            if "Element type:" in line:
-                parts = line.split(":", 1)
-                if len(parts) > 1:
-                    current_element_type = parts[1].strip()
-                continue
-
-            if "Element index:" in line:
-                if "Array device slot" in current_element_type:
-                    try:
-                        idx_part = line.split(":")[1].strip()
-                        idx_str = idx_part.split()[0]
-                        num_slots += 1
-                        drive_slot_indices.append(int(idx_str))
-                    except (ValueError, IndexError):
-                        pass
+        aes_slots = parse_aes_slots(SysExec("sg_ses --page=aes " + str(sg_dev)))
+        drive_slot_indices = sorted(
+            idx for (etype, idx, addr) in aes_slots
+            if "Array device slot" in etype
+        )
+        num_slots = len(drive_slot_indices)
 
         dedup[wwn]["num_slots"] = num_slots
         dedup[wwn]["drive_slot_indices"] = drive_slot_indices
@@ -315,13 +393,13 @@ def map_enclosures():
         elif num_slots == 36:
             base_alias = "Unified"
         elif num_slots == 30:
-             base_alias = "Valiant"
+            base_alias = "Valiant"
 
         if base_alias == "Valiant":
-             unique_alias = f"{base_alias}_{enclosure_index + 1}"
-             enclosure_index += 1
+            unique_alias = f"{base_alias}_{enclosure_index + 1}"
+            enclosure_index += 1
         else:
-             unique_alias = f"{base_alias}"
+            unique_alias = f"{base_alias}"
 
         dedup[wwn]["alias"] = unique_alias
 
@@ -339,35 +417,13 @@ def map_enclosure_slots(enclosures):
 
         slotmap[sg_dev] = {}
 
-        slot = ""
-        sas_wwn = ""
+        aes_slots = parse_aes_slots(SysExec("sg_ses --page=aes " + str(sg_dev)))
 
-        for line in SysExec("sg_ses -p aes " + str(sg_dev)).splitlines():
-
-            if re.search("Element type: SAS expander", line):
-                break
-
-            if not re.search(
-                "(Element index:|SAS address|target port for:)",
-                line
-            ):
+        for etype, idx, addr in aes_slots:
+            if "Array device slot" not in etype:
                 continue
-
-            if re.search("attached SAS address", line):
-                continue
-
-            if re.search("Element index:", line):
-
-                slot = line.split(":")[1].split()[0]
-
-            if re.search("SAS address", line):
-
-                sas_wwn = line.split(":")[1].strip()
-
-                if sas_wwn == "0x0":
-                    sas_wwn = "EMPTY"
-
-                slotmap[sg_dev][slot] = sas_wwn
+            sas_wwn = "EMPTY" if not addr or addr == "0x0" else addr
+            slotmap[sg_dev][str(idx)] = sas_wwn
 
     Debug("EXIT: map_enclosure_slots", {"sg_devs": list(slotmap.keys()), "sample_slots": {k: list(v.keys())[:3] for k, v in slotmap.items()}})
     return slotmap
@@ -378,6 +434,14 @@ def map_enclosure_slots(enclosures):
 # ------------------------------------------------------------------
 
 def map_sg_to_enclosure():
+    """
+    Map /dev/sgN to its sysfs enclosure name.
+
+    /sys/class/scsi_generic/sgN/device and /sys/class/enclosure/<enc>
+    both resolve (via realpath) to the SCSI LUN device directory of the
+    device they represent, so an sg node belongs to an enclosure iff the
+    two resolved paths are equal.
+    """
     Debug("ENTER: map_sg_to_enclosure")
     mapping = {}
     enclosure_root = "/sys/class/enclosure"
@@ -385,14 +449,30 @@ def map_sg_to_enclosure():
         Debug("EXIT: map_sg_to_enclosure (no enclosure root)", mapping)
         return mapping
 
+    sg_root = "/sys/class/scsi_generic"
+    try:
+        sg_list = os.listdir(sg_root)
+    except OSError:
+        Debug("EXIT: map_sg_to_enclosure (no scsi_generic)", mapping)
+        return mapping
+
     for enc_name in os.listdir(enclosure_root):
-        enc_path = os.path.realpath(os.path.join(enclosure_root, enc_name))
+        try:
+            enc_path = os.path.realpath(os.path.join(enclosure_root, enc_name))
+        except OSError:
+            continue
+        # /sys/class/enclosure/<enc> resolves to a node two levels below
+        # the SCSI device directory, so walk up two levels before
+        # comparing against the resolved scsi_generic device path.
         enc_parent = os.path.dirname(os.path.dirname(enc_path))
 
-        for sg in os.listdir("/sys/class/scsi_generic"):
-            sg_path = os.path.realpath(f"/sys/class/scsi_generic/{sg}/device")
+        for sg in sg_list:
+            try:
+                sg_path = os.path.realpath(os.path.join(sg_root, sg, "device"))
+            except OSError:
+                continue
             if sg_path == enc_parent:
-                mapping[f"/dev/{sg}"] = enc_name
+                mapping["/dev/" + sg] = enc_name
 
     Debug("EXIT: map_sg_to_enclosure", mapping)
     return mapping
@@ -425,7 +505,7 @@ def map_enclosure_slots_sysfs():
                 continue
 
             try:
-                devices = os.listdir(block_dir)
+                devices = sorted(os.listdir(block_dir))
             except OSError:
                 continue
 
@@ -530,72 +610,85 @@ def is_multipath_enabled():
     multipath_ll = SysExec("multipath -ll")
     if re.search("DM multipath kernel driver not loaded", multipath_ll):
         return(False)
-    num_lines = sum(1 for line in multipath_ll.splitlines())
-    return num_lines > 0
+    lines = [l for l in multipath_ll.splitlines() if l.strip()]
+    if not lines:
+        return(False)
+    # `multipath -ll` with no paths prints only "multipath: error: ..."
+    # banner lines; a real multipath map has at least one other line.
+    if all(re.search(r"^multipath.*\berror\b", l, re.IGNORECASE) for l in lines):
+        return(False)
+    return True
 
 def map_dm_to_mpath():
+    """
+    Map "dm-N" -> "/dev/mapper/<name>" for multipath devices.
+    Reads the /dev/mapper symlinks directly instead of parsing `ls`
+    output, and returns an empty map if /dev/mapper does not exist.
+    """
     Debug("def map_dm_to_mpath() entry")
     dev_map = {}
-    for line in SysExec("ls -alh /dev/mapper").splitlines():
-        if not re.search("mpath", line):
+    mapper_dir = "/dev/mapper"
+    if not os.path.isdir(mapper_dir):
+        return(dev_map)
+    try:
+        entries = os.listdir(mapper_dir)
+    except OSError:
+        return(dev_map)
+    for entry in entries:
+        if not re.search("mpath", entry):
             continue
-        line = " ".join(line.split())
-        dm_dev = line.split()[-1].split("/")[1]
-        mpath_dev = line.split()[-3]
-        mpath_dev = re.sub("-part1", "", mpath_dev)
-        mpath_dev = re.sub("-part2", "", mpath_dev)
-        dev_map[dm_dev] = mpath_dev
-    return(dev_map)
-
-def map_dm_to_sd_dev():
-    Debug("def map_dm_to_sd_dev() entry")
-    dev_map = {}
-    for line in SysExec("ls -1 /sys/block").splitlines():
-        if not re.search("^dm", line):
+        try:
+            target = os.readlink(os.path.join(mapper_dir, entry))
+        except OSError:
             continue
-        dm_dev = line
-        sd_dev = SysExec("ls -1 /sys/block/" + str(dm_dev) + "/slaves")
-        sd_dev = sd_dev.replace("\n", ",").strip().rstrip(",")
-        if re.search("dm-", sd_dev):
-            continue
-        dev_map[dm_dev] = sd_dev
-    return(dev_map)
-
-def map_mpath_to_sd_dev():
-    Debug("def map_mpath_to_sd_dev() entry")
-    dev_map = {}
-    map_1 = map_dm_to_sd_dev()
-    map_2 = map_dm_to_mpath()
-    for dm in sorted(map_1):
-        sd_dev = map_1[dm]
-        mpath  = map_2[dm]
-        dev_map[mpath] = sd_dev
+        # target is a relative path like "../dm-3"
+        m = re.match(r"\.\./dm-(\d+)$", target)
+        if m:
+            dev_map["dm-" + m.group(1)] = entry
     return(dev_map)
 
 def map_Dev_to_RID(multipath_active):
     Debug("def map_Dev_to_RID() entry")
     Map = {}
-    output_ridlist = SysExec("ls -alh /dev/disk/by-label")
-    map_dm_mpath = map_dm_to_mpath()
+    by_label = "/dev/disk/by-label"
+    if not os.path.isdir(by_label):
+        Debug("map_Dev_to_RID: " + by_label + " not present")
+        return(Map)
 
-    for line in output_ridlist.splitlines():
-        if not re.search("rid-data-", line):
+    map_dm_mpath = map_dm_to_mpath() if multipath_active else {}
+
+    try:
+        entries = os.listdir(by_label)
+    except OSError:
+        return(Map)
+
+    for entry in entries:
+        if not entry.startswith("rid-data-"):
             continue
-        This_Dev = line.split(" ")[-1]
-        This_Dev = This_Dev.split("/")[2]
-        if re.search("^sd", This_Dev):
-            This_Dev = re.sub("[0-9]*$", "", This_Dev)
-        This_Dev = "/dev/" + This_Dev
 
-        This_Rid = line.split(" ")[-3]
-        This_Rid = This_Rid.split("-")[2]
+        try:
+            target = os.readlink(os.path.join(by_label, entry))
+        except OSError:
+            continue
 
-        if multipath_active:
-            This_Dev = This_Dev.split("/")[2]
-            This_Dev = map_dm_mpath.get(This_Dev, This_Dev)
-            This_Dev = "/dev/mapper/" + This_Dev
+        # target is a relative path like "../dm-3" or "../sda1"
+        name = target.split("/")[-1]
 
-        Map[This_Dev] = This_Rid
+        # Strip a trailing partition number (sda1 -> sda); whole-disk
+        # names such as dm-3 are left alone.
+        if re.match(r"^sd[a-z]+\d+$", name):
+            name = re.sub(r"[0-9]+$", "", name)
+
+        # Label scheme: rid-data-<N>
+        parts = entry.split("-")
+        This_Rid = parts[2] if len(parts) >= 3 else entry
+
+        if multipath_active and name.startswith("dm-"):
+            mpath_name = map_dm_mpath.get(name)
+            if mpath_name:
+                name = "/dev/mapper/" + mpath_name
+
+        Map["/dev/" + name] = This_Rid
     return(Map)
 
 def GetLocateLEDState_safe(backplane, slot):
@@ -692,25 +785,32 @@ all_slots = []
 for enc_wwn, enc in enclosures.items():
     alias = enc["alias"]
     sg_dev = enc["sg_dev"]
-    enc_hctl = enc.get("hctl", "")
     num_slots = enc["num_slots"]
     ses_slots = slotmap.get(sg_dev, {})
+    # Use the actual Array-device-slot element indices; backplanes often
+    # have gaps, so range(num_slots) would address the wrong elements.
+    slot_indices = enc.get("drive_slot_indices") or range(num_slots)
 
-    for s in range(num_slots):
+    for s in slot_indices:
         s_str = str(s)
         ses_wwn = ses_slots.get(s_str, "EMPTY")
         all_slots.append({
             "alias": alias,
             "sg_dev": sg_dev,
-            "hctl": enc_hctl,
+            "hctl": enc.get("hctl", ""),
             "slot": s_str,
             "ses_wwn": ses_wwn,
             "drive_wwn": None,
+            "drive_dev": None,
             "drive_data": None,
             "matched_by": None
         })
 
-# 2. First Pass: Match drives to slots using SES WWN
+# 1. First Pass: Match drives to slots using SES WWN.
+#    The slot SAS address reported by the backplane and the drive WWN
+#    differ only in the low bits (within 2), so compare the full 64-bit
+#    values with that tolerance. (An 8-hex-digit prefix match does NOT
+#    work here: every slot on the backplane reports the same prefix.)
 for slot_info in all_slots:
     if slot_info["ses_wwn"] == "EMPTY":
         continue
@@ -727,14 +827,15 @@ for slot_info in all_slots:
         diff = abs(int(drive_wwn, 16) - ses_wwn_int)
         if diff <= 2:
             slot_info["drive_wwn"] = drive_wwn
+            slot_info["drive_dev"] = sd_dev
             slot_info["drive_data"] = d
             slot_info["matched_by"] = "wwn"
             break
 
-# 3. Second Pass: HCTL Bus Fallback
+# 2. Second Pass: HCTL Bus Fallback
 for sd_dev, d in map_lsblk.items():
     if any(sl["drive_wwn"] == d.get("WWN", "") for sl in all_slots):
-        continue 
+        continue
     if "backplane" in d:
         continue
 
@@ -747,16 +848,17 @@ for sd_dev, d in map_lsblk.items():
 
     for slot_info in all_slots:
         if slot_info["drive_wwn"]:
-            continue 
+            continue
 
         enc_bus = ":".join(slot_info["hctl"].split(":")[:3]) if slot_info["hctl"] else ""
         if drive_bus == enc_bus:
             slot_info["drive_wwn"] = d.get("WWN", "")
+            slot_info["drive_dev"] = sd_dev
             slot_info["drive_data"] = d
             slot_info["matched_by"] = "hctl"
             break
 
-# 4. Third Pass: Sysfs Fallback
+# 3. Third Pass: Sysfs Fallback (slot -> block device, identity based).
 for enc_wwn, enc in enclosures.items():
     sg_dev = enc["sg_dev"]
     sysfs_enc = sg_to_enc.get(sg_dev)
@@ -772,9 +874,13 @@ for enc_wwn, enc in enclosures.items():
 
         for slot in all_slots:
             if slot["alias"] == enc["alias"] and not slot["drive_wwn"]:
-                already_matched = any(sl["drive_wwn"] == dev_wwn for sl in all_slots)
+                already_matched = any(
+                    sl["drive_dev"] == dev or sl["drive_wwn"] == dev_wwn
+                    for sl in all_slots
+                )
                 if not already_matched:
-                    slot["drive_wwn"] = dev_wwn
+                    slot["drive_wwn"] = dev_wwn if dev_wwn else dev
+                    slot["drive_dev"] = dev
                     slot["drive_data"] = d
                     slot["matched_by"] = "sysfs"
                     break
@@ -838,7 +944,7 @@ for s in all_slots:
     if disk_data:
         devs = ",".join(sorted(disk_data.get("DEVICES", [])))
         if not devs:
-             devs = s["drive_wwn"] or "-"
+            devs = s["drive_dev"] or s["drive_wwn"] or "-"
 
         vendor = str(disk_data.get("VENDOR", "")).strip()
         model = str(disk_data.get("MODEL", "")).strip()
@@ -919,9 +1025,8 @@ for s in all_slots:
 
 # Sort the output
 output.sort(key=lambda r: (
-    0 if r[0] == "Direct" else 1,
     r[0],
-    int(r[1]) if r[1] != "-" else 999999
+    int(r[1]) if r[1].isdigit() else 999999
 ))
 
 Debug("Output table generation complete", {"rows": len(output)})
