@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+
+import re
+import sys
+import time
+
+from subprocess import Popen, PIPE, STDOUT
+
+# Cache info
+CacheDataArray = {}
+CacheTimeArray = {}
+
+# Enable/disable debugging messages
+Print_Debug = True
+
+
+def Debug(text):
+    """
+    A wrapper to print debugging info on a single line.
+    """
+    if Print_Debug:
+        print("DEBUG:  " + text)
+
+
+def SysExec(cmd):
+    """
+    Run the given command and return the output
+    """
+    Debug("SysExec:: cmd = " + cmd)
+
+    # Cache the output of the command for 20 seconds
+    Cache_Expires = 20
+
+    # Check membership directly on the dict (O(1)) instead of listing keys (O(n))
+    if cmd in CacheDataArray:
+        Cache_Age = time.time() - CacheTimeArray[cmd]
+    else:
+        Cache_Age = 0
+
+    Return_Val = "ERROR"
+
+    # If we have valid data cached, return it
+    if cmd in CacheDataArray and Cache_Age < Cache_Expires:
+        Return_Val = CacheDataArray[cmd]
+
+    # If the cmd is "cat", use fopen/fread/fclose to open it and
+    # cache it as we go
+    elif cmd not in CacheDataArray and cmd.split()[0] == "cat":
+        try:
+            with open(cmd.split()[1], "r") as f:
+                content = f.read()
+        except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
+            Debug(f"SysExec cat error: {e}")
+            return "ERROR"
+        CacheDataArray[cmd] = content
+        CacheTimeArray[cmd] = time.time()
+        Return_Val = CacheDataArray[cmd]
+
+    # If we don't have cached data, or it's too old, regenerate it
+    elif cmd not in CacheDataArray or Cache_Age >= Cache_Expires:
+        proc = Popen(cmd.split(), stdout=PIPE, stderr=STDOUT)
+        output, _ = proc.communicate()
+        if proc.returncode != 0:
+            Debug(f"SysExec returned non-zero exit code: {proc.returncode}")
+        CacheDataArray[cmd] = output
+        CacheTimeArray[cmd] = time.time()
+        Return_Val = CacheDataArray[cmd]
+
+    if isinstance(Return_Val, bytes):
+        Return_Val = Return_Val.decode("utf-8")
+
+    return Return_Val
+
+
+def Get_SASController():
+    """
+    Return the SAS controller model in this depot.
+    """
+    Debug("def Get_SASController() entry")
+
+    output_lspci = SysExec("lspci")
+
+    # Determine the card type, and thus the path we need to take...
+    SAS_Controller = "Unknown"
+
+    for line in output_lspci.splitlines():
+        # Falcon is our 1st gen SAS controller
+        if re.search(r"SAS2008 PCI-Express Fusion-MPT SAS-2 \[Falcon\] \(rev 03\)", line):
+            SAS_Controller = "LSI_Falcon"
+            break
+
+        # Thunderbolt is our 2nd gen SAS controller
+        if re.search(r"MegaRAID SAS 2208 \[Thunderbolt\] \(rev 05\)", line):
+            SAS_Controller = "LSI_Thunderbolt"
+            break
+
+        # Invader is our 3rd gen SAS controller
+        if re.search(r"MegaRAID SAS-3 3108 \[Invader\] \(rev 02\)", line):
+            SAS_Controller = "LSI_Invader"
+            break
+
+        # TriMode is our 4th gen SAS controller
+        if re.search(r"SAS3408 Fusion-MPT Tri-Mode I/O Controller Chip", line):
+            SAS_Controller = "LSI_FusionMPT"
+            break
+
+        # Our 5th gen SAS controller
+        if re.search(r"LSI Fusion-MPT 12GSAS/PCIe Secure SAS38xx", line):
+            SAS_Controller = "LSI_FusionMPT"
+            break
+
+    Debug("Get_SASController()::  SAS Controller type = " + SAS_Controller)
+
+    if SAS_Controller == "Unknown":
+        Debug("Get_SASController()::  This is an unknown controller type which may not work properly without new code.")
+
+    Debug("def Get_SASController() exit")
+
+    return SAS_Controller
+
+
+def FindBackplanes():
+    """
+    Use the "lsbackplane" command to return info about backplanes in the server.
+    """
+    Debug("def FindBackplanes() entry")
+
+    Backplanes = {}
+
+    # Iterate over a list of enclosures
+    output_lsbackplane = SysExec("lsbackplane")
+
+    for line in output_lsbackplane.splitlines():
+        if not re.search("/dev/", line):
+            continue
+
+        fields = line.split("|")
+        Enc_SG_Dev = fields[1].strip()
+
+        Backplanes[Enc_SG_Dev] = {}
+        Backplanes[Enc_SG_Dev]["NumSlots"] = fields[2].strip()
+        Backplanes[Enc_SG_Dev]["Bus"] = fields[3].strip()
+        Backplanes[Enc_SG_Dev]["SASAddr"] = fields[4].strip()
+        Backplanes[Enc_SG_Dev]["Alias"] = fields[5].strip()
+
+        Debug("FindBackplanes()::  Backplane " + Enc_SG_Dev + " NumSlots " + Backplanes[Enc_SG_Dev]["NumSlots"] + " Bus " + Backplanes[Enc_SG_Dev]["Bus"] + " SASAddr " + Backplanes[Enc_SG_Dev]["SASAddr"] + " Alias " + Backplanes[Enc_SG_Dev]["Alias"])
+
+    Debug("def FindBackplanes() exit")
+
+    return Backplanes
+
+
+def FindEnclosure(backplane_query, backplanes_list, use_regex=False):
+    """
+    Search backplanes_list for a backplane matching backplane_query.
+    Returns (enclosure_sg_dev, enclosure_bus) or (None, None) if not found.
+
+    When use_regex is True (Thunderbolt/Invader paths), the query is
+    escaped before searching to prevent regex injection.
+    When use_regex is False (generic path), exact string equality is used.
+    """
+    for bp, keyvals in backplanes_list.items():
+        for key, val in backplanes_list[bp].items():
+            if use_regex:
+                # Escape user input to prevent regex injection
+                if re.search(re.escape(backplane_query), val, re.IGNORECASE):
+                    enclosure = bp
+                    bus = backplanes_list[bp]["Bus"]
+                    return enclosure, bus
+            else:
+                if backplane_query == val:
+                    enclosure = bp
+                    bus = backplanes_list[bp]["Bus"]
+                    return enclosure, bus
+    return None, None
+
+
+###########################################################
+# Main program
+###########################################################
+
+if len(sys.argv) != 4:
+    print("\n" + sys.argv[0] + " - Turn on/off a LED on a slot")
+    print("\nUsage: " + sys.argv[0] + " [backplane] [slot#] [on|off]\n")
+    sys.exit(1)
+
+# Validate on/off argument early using safe string comparison
+if sys.argv[3].lower() not in ("on", "off"):
+    print("Error:  The location light can only be in state 'on' or 'off'.   You specified state '" + sys.argv[3] + "', which is invalid.")
+    sys.exit(1)
+
+SAS_Controller = Get_SASController()
+
+if SAS_Controller == "Unknown":
+    print("ERROR:  Didn't recognize SAS/RAID card.  Quitting...")
+    sys.exit(1)
+
+Debug("light_slot called with arguments: " + str(sys.argv))
+
+Backplanes_List = FindBackplanes()
+
+if SAS_Controller == "LSI_Thunderbolt":
+    Debug("LSI_Thunderbolt path")
+    Debug("Using MegaCli64 to switch locate LED...")
+
+    enclosure, bus = FindEnclosure(sys.argv[1], Backplanes_List, use_regex=True)
+
+    if enclosure is None:
+        print("ERROR:  Could not detect enclosure " + sys.argv[1])
+        sys.exit(1)
+
+    try:
+        enclosure_id = bus.split(":")[2]
+    except IndexError:
+        print("ERROR:  Could not parse enclosure bus: " + bus)
+        sys.exit(1)
+
+    Verb = "-start" if sys.argv[3].lower() == "on" else "-stop"
+
+    print("INFO:  Setting the locate LED for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
+    SysExec("MegaCli64 -PdLocate " + Verb + " -physdrv[" + enclosure_id + ":" + sys.argv[2] + "] -aAll")
+    sys.exit()
+
+elif SAS_Controller == "LSI_Invader":
+    Debug("LSI_Invader path")
+    Debug("Using storcli64 to switch locate LED...")
+    Debug("Backplanes_List = " + str(Backplanes_List))
+
+    enclosure, bus = FindEnclosure(sys.argv[1], Backplanes_List, use_regex=True)
+
+    if enclosure is None:
+        print("ERROR:  Could not detect enclosure " + sys.argv[1])
+        sys.exit(1)
+
+    try:
+        enclosure_id = bus.split(":")[2]
+    except IndexError:
+        print("ERROR:  Could not parse enclosure bus: " + bus)
+        sys.exit(1)
+
+    num_slots = int(Backplanes_List[enclosure]["NumSlots"])
+
+    if int(sys.argv[2]) not in range(0, num_slots):
+        print("ERROR:  Backplane only has " + str(num_slots) + " slots.")
+        sys.exit(1)
+
+    Verb = "start" if sys.argv[3].lower() == "on" else "stop"
+
+    print("INFO:  Setting the locate LED for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
+    SysExec("storcli64 /c0/e" + enclosure_id + "/s" + str(int(sys.argv[2]) + 1) + " " + Verb + " locate")
+    sys.exit()
+
+else:
+    Debug("Generic path")
+    Debug("Using sg_ses to switch locate LED...")
+    Debug("Testing for " + sys.argv[1] + " " + sys.argv[2])
+
+    enclosure, bus = FindEnclosure(sys.argv[1], Backplanes_List, use_regex=False)
+
+    if enclosure is None:
+        print("Error:  The backplane '" + sys.argv[1] + "' could not be found.")
+        sys.exit(1)
+
+    num_slots = int(Backplanes_List[enclosure]["NumSlots"])
+    Debug("num_slots = " + str(num_slots))
+
+    if int(sys.argv[2]) not in range(0, num_slots):
+        print("ERROR:  Backplane only has " + str(num_slots) + " slots.")
+        sys.exit(1)
+
+    Verb = "--set=ident" if sys.argv[3].lower() == "on" else "--clear=ident"
+
+    print("INFO:  Setting the locate LED for slot " + sys.argv[1] + " " + sys.argv[2] + " to " + sys.argv[3].lower())
+    SysExec("sg_ses -I " + sys.argv[2] + " " + Verb + " " + enclosure)
+    sys.exit()
